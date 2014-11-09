@@ -27,276 +27,7 @@
 #	* deleting
 
 
-# idea:
-# sysed clone|delete|resize $lv 
-#
-# sysed -c/--clone -r/--running||-l/--lv[name] -n:$name[name of the cloned lv] -g[install at grub] -a(alternate)[use dd instead of rsync] 
-# sysed -d/--delete $lv[NO default - error if no lv is given] -g[delete from grub]
-#
-# TODO:
-# sysed resize $lv
-
-# programs
-LN="/bin/ln"
-CP="/bin/cp"
-SED="/bin/sed"
-LS="/bin/ls"
-GREP="/bin/grep"
-RM="/bin/rm"
-DD="/bin/dd"
-AWK="/bin/awk"
-MKDIR="/bin/mkdir"
-MOUNT="/bin/mount"
-UMOUNT="/bin/umount"
-LVCREATE="/sbin/lvcreate"
-LVREMOVE="/sbin/lvremove"
-LVS="/sbin/lvs"
-RC_SERVICE="/sbin/rc-service"
-KPARTX="/sbin/kpartx"
-CUT="/bin/cut"
-# WARNING: not gzip but pigz needs to be installed)
-GZIP="/usr/bin/pigz"
-
-# default paths
-VG_NAME="vg0"
-VG_PATH="/dev/${VG_NAME}"
-IMAGE_NAME=""
-IMAGE_SIZE="20G"
-SNAPSHOTSIZE="5G"
-
-
-
-#
-# config_change()
-# change settings in a config file
-#
-#config_change(){
-#  # 1=${TARGET_KEY}, 2=${REPLACEMENT_VALUE}, 3=${CONFIG_FILE}
-#  ${SED} -i "s|\(${1} *= *\).*|\1\"${2}\"|" "${3}"
-#  # remove leading "#" if there is one
-#  ${SED} -i "s/^#${1}/${1}/g" "${3}"
-#}
-
-#
-# select_from()
-# selector for various functions
-#
-select_from(){
-  select SELECT_VAR in ${1}; do
-    echo "${SELECT_VAR}"
-    break;
-  done
-}
-
-#
-# set_image_name()
-# set the name of the image
-#
-set_image_name() {
-  # ${1} = path to check, ${2} = default image name
-  while true; do
-    echo -n "Please set image name [default: ${2}]: "
-    read input
-    if [ -z "${input}" ]; then
-      IMAGE_NAME="${2}"
-    else
-      IMAGE_NAME="${input}"
-    fi
-    if [ -e "${1}/${IMAGE_NAME}" ]; then
-      echo "File exists, choose different name"
-    else
-      break
-    fi
-  done
-}
-
-#
-# set_image_path()
-# sets the path for compress/convert 'ing
-#
-set_image_path() {
-  # ${1} = default path (given over cmdline)
-  while true; do
-    echo -n "Set path, where the file should be stored [default: ${1}]: "
-    read input
-    if [ -z "${input}" ]; then
-      IMAGE_PATH="${1}"
-    else
-      IMAGE_PATH="${input}"
-    fi
-    if ! [ -d "${IMAGE_PATH}" ]; then
-      echo "Path dosen't exist, choose different one"
-    else
-      break
-    fi
-  done
-}
-
-#
-# creat_lv()
-# creates a new lvm partition
-#
-create_lv(){
-  #${1}=size, ${2}=image_name, ${3}=vg_path
-  ${LVCREATE} --size ${1} --name "${2}" "${3}"
-}
-
-
-#
-# edit_config
-# change a exiting config
-#
-edit_config(){
-  IFS=$'\n'
-  
-  echo "Select the config file: "
-  CFILE=$(select_from "`${LS} /etc/conf.d/|${GREP} "kvm.*"`")
-  echo "You selected: ${CFILE}"
-  
-  VAR=$(select_from "`${GREP} < /etc/conf.d/${CFILE} -v ^\# | ${SED} -e "/^ *$/d"`")
-  echo "You choose Variable ${VAR}"
-  
-  echo -n "Please give the new Variable: "
-  read new_var
-  
-  config_change "`echo ${VAR}| ${CUT} -d '=' -f 1`" "${new_var}" "/etc/conf.d/${CFILE}"
-  echo "Done"
-  
-  unset IFS
-}
-
-#
-# delete_guest
-# delete a guest image
-#
-delete_guest(){
-  echo "Select the image to delete: "
-  RM_GUEST=$(select_from "`${LS} ${VG_PATH}`")
-  echo "You choose ${RM_GUEST}"
-  
-  echo "*** WARNING ***"
-  info_changes del
-  read -p "You really want to delete ${RM_GUEST}? (Press Ctrl+C for cancel) "
-
-  # stop the virtual guest
-  ${LVREMOVE} --force "${VG_PATH}"/"${RM_GUEST}"
-}
-
-#
-# new_guest()
-# function for creating new virtual images
-#
-new_guest(){
-  echo -n "Please set the image size [default is: ${IMAGE_SIZE}]: "
-  read input
-  [ -z "${input}" ] || IMAGE_SIZE="${input}"
-  
-  set_image_name "${VG_PATH}" "new_guest"
-  
-  info_changes new
-  
-  create_lv "${IMAGE_SIZE}" "${IMAGE_NAME}" "${VG_PATH}"
-}
-
-#
-# copy_guest()
-# function for coping virtual images
-#
-copy_guest(){
-  echo "Select the image to copy:"
-  CP_GUEST=$(select_from "`${LS} ${VG_PATH}`")
-  echo "You choose ${CP_GUEST}"
-  
-  # set important vars
-  IMAGE_TO_COPY="${CP_GUEST}"
-  
-  # get the size of the original guest
-  COPY_SIZE=`${LVS} ${VG_PATH}/${CP_GUEST} -o LV_SIZE --noheadings --units b --nosuffix`
-  
-  set_image_name "${VG_PATH}" "${CP_GUEST}_new"
-  echo "Enter hostname of the new guest [default: ${IMAGE_NAME}]: "
-  read guest_hostname
-  [ -z "${guest_hostname}" ] || guest_hostname="${IMAGE_NAME}"
-  
-  info_changes copy
-  
-  create_lv "${COPY_SIZE}b" "${IMAGE_NAME}" "${VG_PATH}"
-  
-  # create snapshot
-  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${CP_GUEST}-snapshot "${VG_PATH}/${CP_GUEST}"
-  echo "Copy..."
-  ${DD} if=${VG_PATH}/${IMAGE_TO_COPY}-snapshot bs=4k conv=sync,noerror of=${VG_PATH}/${IMAGE_NAME}
-  # delete snapshot
-  ${LVREMOVE} --force ${VG_PATH}/${CP_GUEST}-snapshot
-  
-  # edit settings of the new vm
-  # mount vm
-  TMP_DIR="${IMAGE_NAME}-${RANDOM}"
-  ${MKDIR} /tmp/${TMP_DIR}
-  ${KPARTX} -a "${VG_PATH}/${IMAGE_NAME}"
-  
-  config_change "hostname" "${guest_hostname}" "/tmp/${TMP_DIR}/etc/conf.d/hostname"  
-  
-}
-
-#
-# compress_lvm()
-# compress a lvm partition
-#
-compress_lvm() {
-  echo "Select the image to compress:"
-  COMP_GUEST=$(select_from "`${LS} ${VG_PATH}`")
-  echo "You choose ${COMP_GUEST}"
-  
-  set_image_path "${COMP_PATH}"
-  set_image_name "${IMAGE_PATH}" "${COMP_GUEST}"
-  info_changes compress
-  
-  # create snapshot
-  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${COMP_GUEST}-snapshot ${VG_PATH}/${COMP_GUEST}
-  echo -n "Compressing..."
-  ${DD} if=${VG_PATH}/${COMP_GUEST}-snapshot bs=4k conv=sync,noerror 2>/dev/null | ${GZIP} -c > ${IMAGE_PATH}/${IMAGE_NAME}.gz
-  # delete snapshot
-  ${LVREMOVE} --force ${VG_PATH}/${COMP_GUEST}-snapshot
-}
-
-#
-# convert_guest()
-# convert a lvm partition to qcow2
-#
-convert_guest(){
-  echo "Select the image to convert:"
-  CONV_GUEST=$(select_from "`${LS} ${VG_PATH}`")
-  echo "You choose ${CONV_GUEST}"
-  
-  set_image_path "${QCOW2_PATH}"
-  set_image_name "${IMAGE_PATH}" "${CONV_GUEST}.qcow2"
-  
-  echo -n "Would you like to compress the image? [N/y]: "
-  local compress_image=false
-  read input
-  if [ "${input}" == "y" ]; then
-    compress_image=true
-  fi
-  
-  info_changes convert
-  
-  # create snapshot
-  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${CONV_GUEST}-snapshot ${VG_PATH}/${CONV_GUEST}
-  echo "Converting..."
-  ${QEMUIMG} convert -O qcow2 ${VG_PATH}/${CONV_GUEST}-snapshot ${IMAGE_PATH}/${IMAGE_NAME}
-  # delete snapshot
-  ${LVREMOVE} --force ${VG_PATH}/${CONV_GUEST}-snapshot
-  
-  if (${compress_image}); then
-    echo "Compressing..."
-    ${GZIP} ${IMAGE_PATH}/${IMAGE_NAME}
-  fi
-}
-
-
-
-# this is an example!
+# this is an example for getopt
 
 # “a” and “arga” have optional arguments with default values.
 # “b” and “argb” have no arguments, acting as sort of a flag.
@@ -334,6 +65,111 @@ convert_guest(){
 #echo "ARG_C = $ARG_C"
 
 
+# idea:
+# sysed clone|delete|resize $lv 
+#
+# sysed -c/--clone -r/--running||-l/--lv[name] -n:$name[name of the cloned lv] -g[install at grub] -a(alternate)[use dd instead of rsync] 
+# sysed -d/--delete $lv[NO default - error if no lv is given] -g[delete from grub]
+#
+# TODO:
+# sysed resize $lv
+
+# programs
+LVCREATE="/sbin/lvcreate"
+LVREMOVE="/sbin/lvremove"
+LVS="/sbin/lvs"
+
+# default vars
+DEVLV="/dev/vg0/"
+GRUB_CFG="/boot/grub/grub.cfg"
+MODE=""
+FS=""
+
+# save mode, ask before really delete something
+SAVE=1
+
+
+#
+# config_change()
+# change settings in a config file
+#
+#config_change(){
+#  # 1=${TARGET_KEY}, 2=${REPLACEMENT_VALUE}, 3=${CONFIG_FILE}
+#  ${SED} -i "s|\(${1} *= *\).*|\1\"${2}\"|" "${3}"
+#  # remove leading "#" if there is one
+#  ${SED} -i "s/^#${1}/${1}/g" "${3}"
+#}
+
+
+#
+# edit_config
+# change a exiting config
+#
+#edit_config(){
+#  IFS=$'\n'
+#  
+#  echo "Select the config file: "
+#  CFILE=$(select_from "`${LS} /etc/conf.d/|${GREP} "kvm.*"`")
+#  echo "You selected: ${CFILE}"
+#  
+#  VAR=$(select_from "`${GREP} < /etc/conf.d/${CFILE} -v ^\# | ${SED} -e "/^ *$/d"`")
+#  echo "You choose Variable ${VAR}"
+#  
+#  echo -n "Please give the new Variable: "
+#  read new_var
+#  
+#  config_change "`echo ${VAR}| ${CUT} -d '=' -f 1`" "${new_var}" "/etc/conf.d/${CFILE}"
+#  echo "Done"
+#  
+#  unset IFS
+#}
+#
+#
+##
+## compress_lvm()
+## compress a lvm partition
+##
+#compress_lvm() {
+#  echo "Select the image to compress:"
+#  COMP_GUEST=$(select_from "`${LS} ${VG_PATH}`")
+#  echo "You choose ${COMP_GUEST}"
+#  
+#  set_image_path "${COMP_PATH}"
+#  set_image_name "${IMAGE_PATH}" "${COMP_GUEST}"
+#  info_changes compress
+#  
+#  # create snapshot
+#  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${COMP_GUEST}-snapshot ${VG_PATH}/${COMP_GUEST}
+#  echo -n "Compressing..."
+#  ${DD} if=${VG_PATH}/${COMP_GUEST}-snapshot bs=4k conv=sync,noerror 2>/dev/null | ${PIGZ} -c > ${IMAGE_PATH}/${IMAGE_NAME}.gz
+#  # delete snapshot
+#  ${LVREMOVE} --force ${VG_PATH}/${COMP_GUEST}-snapshot
+#}
+
+
+grub_edit() {
+	#TODO:
+	# set new root as default in grub
+
+	local mode=$1
+	local grub_name=`echo ${CLONE_NAME}|tr '_' ' '`
+	case "$mode" in
+		add)
+			local grub_kernel=`cat ${GRUB_CFG} | grep ${LV} | cut -d ' ' -f 2`
+			echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} lvm=${CLONE_NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
+			;;
+		del)
+			# insert beginning of removal
+			awk -v pat="${LV}" '{a[NR]=$0;}END{for(i=1;i<=NR;i++){if(a[i+1] ~ pat ){print "<!-- BOF CLEAN -->\n"a[i];}else{print a[i];}}}' ${GRUB_CFG} > /tmp/grub.cfg.tmp
+			# insert end of removal
+			sed -i '/${LV}/{N;N;s/$/\n<!-- EOF CLEAN -->/}' /tmp/grub.cfg.tmp
+			# remove entry
+			sed -i '/<!-- BOF CLEAN -->/,/<!-- EOF CLEAN -->/d' /tmp/grub.cfg.tmp
+			mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
+			;;
+	esac
+}
+
 mode_list() {
 	echo "Actual Running SYS:"
 	get_actual_lv
@@ -343,24 +179,80 @@ mode_list() {
 }
 
 mode_delete() {
-	echo "delete mode"
+	if ((${SAVE})); then
+		echo "*** WARNING ***"
+		if ((${UNINSTALL_GRUB})); then
+			echo "Following Grub Entry will be removed:"
+			echo
+			if ! `cat ${GRUB_CFG} |grep ${LV} > /dev/null`; then
+				echo "No Grub Entry found! Nothing gonna be removed!"
+				UNINSTALL_GRUB=0
+			else
+				cat ${GRUB_CFG} | grep -A2 -B1 ${LV}
+			fi
+		fi
+		${LVREMOVE} "${DEVLV}/${LV}"
+		(($?)) && exit 1
+	else
+		${LVREMOVE} --force "${DEVLV}/${LV}"
+	fi
+
+	((${UNINSTALL_GRUB})) && grub_edit del
 }
 
 mode_clone() {
-	echo "clone mode"
+
+	local snapshotsize=10G
+	local copy_size=`${LVS} ${DEVLV}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`
+
+	# create new lv
+	${LVCREATE} --size ${copy_size}b --name "${CLONE_NAME}" "vg0"
+	
+	 # create snapshot
+	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
+	echo "Copy..."
+	if ((${USE_DD})); then
+		${DD} if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${CLONE_NAME}
+	else
+		# default: use original fs
+		mkfs -t ${FS} -q ${DEVLV}/${CLONE_NAME}
+
+		local lv_org="/tmp/$RANDOM"
+		local lv_copy="/tmp/$RANDOM"
+		mkdir -p ${lv_org} ${lv_copy}
+
+		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
+		mount ${DEVLV}/${CLONE_NAME} ${lv_copy}
+
+		rsync -aAX --info=progress2 --exclude={"/tmp/*","/lost+found","/usr/portage/*"} /${lv_org}/* /${lv_copy}/
+		mkdir -p ${lv_copy}/usr/portage/{distfiles,packages}
+
+		umount ${lv_copy}
+		umount ${lv_org}
+
+		rm -rf ${lv_org} ${lv_copy}
+	fi
+	# delete snapshot
+	${LVREMOVE} --force "${DEVLV}/${LV}-snapshot"
+
+	((${INSTALL_GRUB})) && grub_edit add
 }
 
+
+
+
 usage() {
-	echo -e "\t$0 -c|--clone [-r|-sNAME] [-i] [-a] [-nNAME]"
-	echo -e "\t$0 -d|--delete [-sNAME] [-u]"
+	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
+	echo -e "\t$0 -d|--delete[LV] [-u]"
 	echo -e "\t$0 -l|--list"
 	echo 
-	echo "Options:"
-	echo -e " -r|--running\t\tuse running system"
+	echo "Clone Options:"
+	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
+	echo -e " -f|--fs\t\troot filestyem type"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
-	echo -e " -n|--name [NAME]\tname of the new sys"
-	echo -e " -s|--sys [SYS]\t\tchoose sys for delete/clone"
+	echo 
+	echo "Delete Options:"
 	echo -e " -u|--uninstall\t\tremove grub entry"
 }
 
@@ -382,37 +274,47 @@ set_mode(){
 	fi
 }
 
-MODE=""
+# start here
+if [ $# -lt 1 ]; then
+	usage
+fi
 
-
-OPTS=`getopt -o hcdlriuas:n: --long help,clone,delete,list,running,install,uninstall,alternate,sys:,name: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
 while true ; do
 	case "$1" in
+		# help
 		-h|--help) usage ; shift ;;
 		# modes 
-		-c|--clone) set_mode "clone" ; shift ;;
-		-d|--delete) set_mode "delete" ; shift ;;
+		-c|--clone) 
+			set_mode "clone"
+			case "$2" in
+				"") LV="$(get_actual_lv)" ; shift 2 ;;
+				*) LV="${2##*/}" ; shift 2 ;;
+			esac ;;
+		-d|--delete) 
+			set_mode "delete" 
+			case "$2" in
+				"") shift 2 ;;
+				*) LV="${2##*/}" ; shift 2 ;;
+			esac ;;
 		-l|--list) set_mode "list" ; shift ;;
 		# options
-		-r|--running) SET_RUNNING=1 ; shift ;;
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
 		-a|--alternate) USE_DD=1; shift ;;
-		# selects sys
-		-s|--sys)
-			SET_SYS=1
+		-f|--fs)
 			case "$2" in
 				"") shift 2 ;;
-				*) LV=$2 ; shift 2 ;;
+				*) FS="${2}" ; shift 2 ;;
 			esac ;;
 		# provide a name for a new sys
 		-n|--name)
 			case "$2" in
 				"") shift 2 ;;
-				*) CLONE_NAME=$2 ; shift 2 ;;
+				*) CLONE_NAME=`echo $2|tr ' ' '_'|tr '[:upper:]' '[:lower:]'` ; shift 2 ;;
 			esac ;;
 		--) shift ; break ;;
 		*) echo "Internal error!" ; exit 1 ;;
@@ -427,7 +329,7 @@ case "$MODE" in
 		if [ -z $LV ]; then
 			echo "No sys given! Exit!"
 			exit 1
-		elif ! [ -b /dev/vg0/$LV ]; then
+		elif ! [ -b "${DEVLV}/${LV}" ]; then
 			echo "$LV not found. Exit!"
 			exit 1
 		elif [ $LV == $(get_actual_lv) ];then
@@ -435,21 +337,12 @@ case "$MODE" in
 			exit 1
 		fi
 		mode_delete
-		(($UNINSTALL_GRUB)) && echo "grub uninstall"
 		;;
 	clone)
-		if (($SET_RUNNING)) && (($SET_SYS)); then
-			echo "You can't use both -s and -r"
-			echo "Please choose either or"
-			exit 1
-		fi
-
-		(($SET_RUNNING)) && LV="/dev/vg0/$(get_actual_lv)"
-
 		if [ -z $LV ]; then
 			echo "No sys given! Exit!"
 			exit 1
-		elif ! [ -b $LV ]; then
+		elif ! [ -b "${DEVLV}/${LV}" ]; then
 			echo "Couldn't found ${LV}. Exit!"
 			exit 1
 		fi
@@ -457,11 +350,19 @@ case "$MODE" in
 		if [ -z $CLONE_NAME ]; then
 			echo "No name given. Exit!"
 			exit 1
-		elif [ -b /dev/vg0/$CLONE_NAME ]; then
+		elif [ -b "${DEVLV}/${CLONE_NAME}" ]; then
 			echo "Sys already in use. Exit!"
 			exit 1
 		fi
+		if ! [ -z ${FS} ]; then
+			if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
+				echo "Invalid fs. Support are: ext2, ext3, ext4, jfs"
+				exit 1
+			fi
+		else
+			# use fs of the original sys
+			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
+		fi
 		mode_clone
-		(($INSTALL_GRUB)) && echo "grub install"
 		;;
 esac
