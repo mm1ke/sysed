@@ -26,53 +26,11 @@
 #	* listing
 #	* deleting
 
-
-# this is an example for getopt
-
-# “a” and “arga” have optional arguments with default values.
-# “b” and “argb” have no arguments, acting as sort of a flag.
-# “c” and “argc” have required arguments.
-
-# set an initial value for the flag
-#ARG_B=0
-#
-## read the options
-#TEMP=`getopt -o a::bc: --long arga::,argb,argc: -n 'test.sh' -- "$@"`
-#eval set -- "$TEMP"
-#
-## extract options and their arguments into variables.
-#while true ; do
-#    case "$1" in
-#        -a|--arga)
-#            case "$2" in
-#                "") ARG_A='some default value' ; shift 2 ;;
-#                *) ARG_A=$2 ; shift 2 ;;
-#            esac ;;
-#        -b|--argb) ARG_B=1 ; shift ;;
-#        -c|--argc)
-#            case "$2" in
-#                "") shift 2 ;;
-#                *) ARG_C=$2 ; shift 2 ;;
-#            esac ;;
-#        --) shift ; break ;;
-#        *) echo "Internal error!" ; exit 1 ;;
-#    esac
-#done
-#
-## do something with the variables -- in this case the lamest possible one :-)
-#echo "ARG_A = $ARG_A"
-#echo "ARG_B = $ARG_B"
-#echo "ARG_C = $ARG_C"
-
-
-# idea:
-# sysed clone|delete|resize $lv 
-#
-# sysed -c/--clone -r/--running||-l/--lv[name] -n:$name[name of the cloned lv] -g[install at grub] -a(alternate)[use dd instead of rsync] 
-# sysed -d/--delete $lv[NO default - error if no lv is given] -g[delete from grub]
-#
 # TODO:
-# sysed resize $lv
+# sysed
+# 	- resize $lv
+#	- backup to tar.gz
+
 
 # programs
 LVCREATE="/sbin/lvcreate"
@@ -88,47 +46,6 @@ FS=""
 # save mode, ask before really delete something
 SAVE=1
 
-
-#
-# config_change()
-# change settings in a config file
-#
-#config_change(){
-#  # 1=${TARGET_KEY}, 2=${REPLACEMENT_VALUE}, 3=${CONFIG_FILE}
-#  ${SED} -i "s|\(${1} *= *\).*|\1\"${2}\"|" "${3}"
-#  # remove leading "#" if there is one
-#  ${SED} -i "s/^#${1}/${1}/g" "${3}"
-#}
-
-
-#
-# edit_config
-# change a exiting config
-#
-#edit_config(){
-#  IFS=$'\n'
-#  
-#  echo "Select the config file: "
-#  CFILE=$(select_from "`${LS} /etc/conf.d/|${GREP} "kvm.*"`")
-#  echo "You selected: ${CFILE}"
-#  
-#  VAR=$(select_from "`${GREP} < /etc/conf.d/${CFILE} -v ^\# | ${SED} -e "/^ *$/d"`")
-#  echo "You choose Variable ${VAR}"
-#  
-#  echo -n "Please give the new Variable: "
-#  read new_var
-#  
-#  config_change "`echo ${VAR}| ${CUT} -d '=' -f 1`" "${new_var}" "/etc/conf.d/${CFILE}"
-#  echo "Done"
-#  
-#  unset IFS
-#}
-#
-#
-##
-## compress_lvm()
-## compress a lvm partition
-##
 #compress_lvm() {
 #  echo "Select the image to compress:"
 #  COMP_GUEST=$(select_from "`${LS} ${VG_PATH}`")
@@ -148,9 +65,6 @@ SAVE=1
 
 
 grub_edit() {
-	#TODO:
-	# set new root as default in grub
-
 	local mode=$1
 	local grub_name=`echo ${CLONE_NAME}|tr '_' ' '`
 	case "$mode" in
