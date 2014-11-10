@@ -29,7 +29,7 @@
 # TODO:
 # sysed
 # 	- resize $lv
-#	- backup to tar.gz
+#	- backup/restore to tar.gz
 
 
 # programs
@@ -47,14 +47,6 @@ FS=""
 SAVE=1
 
 #compress_lvm() {
-#  echo "Select the image to compress:"
-#  COMP_GUEST=$(select_from "`${LS} ${VG_PATH}`")
-#  echo "You choose ${COMP_GUEST}"
-#  
-#  set_image_path "${COMP_PATH}"
-#  set_image_name "${IMAGE_PATH}" "${COMP_GUEST}"
-#  info_changes compress
-#  
 #  # create snapshot
 #  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${COMP_GUEST}-snapshot ${VG_PATH}/${COMP_GUEST}
 #  echo -n "Compressing..."
