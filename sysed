@@ -28,6 +28,7 @@
 
 # TODO:
 # sysed
+#	- clone with settings size (resize?)
 # 	- resize $lv
 #	- backup/restore to tar.gz
 
