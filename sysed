@@ -30,13 +30,13 @@
 # sysed
 #	- clone with settings size (resize?)
 # 	- resize $lv
-#	- backup/restore to tar.gz
-#	- rename
+#	- restore gz
 
 
 # programs
 LVCREATE="/sbin/lvcreate"
 LVREMOVE="/sbin/lvremove"
+LVRENAME="/sbin/lvrename"
 LVS="/sbin/lvs"
 
 # default vars
@@ -47,16 +47,6 @@ FS=""
 
 # save mode, ask before really delete something
 SAVE=1
-
-#compress_lvm() {
-#  # create snapshot
-#  ${LVCREATE} --size ${SNAPSHOTSIZE} --snapshot --name ${COMP_GUEST}-snapshot ${VG_PATH}/${COMP_GUEST}
-#  echo -n "Compressing..."
-#  ${DD} if=${VG_PATH}/${COMP_GUEST}-snapshot bs=4k conv=sync,noerror 2>/dev/null | ${PIGZ} -c > ${IMAGE_PATH}/${IMAGE_NAME}.gz
-#  # delete snapshot
-#  ${LVREMOVE} --force ${VG_PATH}/${COMP_GUEST}-snapshot
-#}
-
 
 grub_edit() {
 	local mode=$1
@@ -86,6 +76,16 @@ mode_list() {
 	lvs | egrep -i -v "sys|LV"
 }
 
+mode_backup() {
+	local snapshotsize=10G
+	# create snapshot
+	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
+	echo -n "Compressing..."
+	dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
+	# delete snapshot
+	${LVREMOVE} --force ${DEVLV}/${LV}-snapshot
+}
+
 mode_delete() {
 	if ((${SAVE})); then
 		echo "*** WARNING ***"
@@ -108,6 +108,11 @@ mode_delete() {
 	((${UNINSTALL_GRUB})) && grub_edit del
 }
 
+mode_rename() {
+	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${CLONE_NAME}"
+	sed -i "s/${LV}/${CLONE_NAME}/g" ${GRUB_CFG}	
+}
+
 mode_clone() {
 
 	local snapshotsize=10G
@@ -120,7 +125,7 @@ mode_clone() {
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
 	if ((${USE_DD})); then
-		${DD} if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${CLONE_NAME}
+		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${CLONE_NAME}
 	else
 		# default: use original fs
 		mkfs -t ${FS} -q ${DEVLV}/${CLONE_NAME}
@@ -152,6 +157,8 @@ mode_clone() {
 usage() {
 	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
 	echo -e "\t$0 -d|--delete[LV] [-u]"
+	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
+	echo -e "\t$0 -b|--backup[LV] [-pPATH]"
 	echo -e "\t$0 -l|--list"
 	echo 
 	echo "Clone Options:"
@@ -162,6 +169,12 @@ usage() {
 	echo 
 	echo "Delete Options:"
 	echo -e " -u|--uninstall\t\tremove grub entry"
+	echo
+	echo "Rename Options:"
+	echo -e " -n|--name [NAME]\tnew name of the sys (REQUIRED)"
+	echo
+	echo "Backup Options"
+	echo -e " -p|--path [PATH]\tsave backup to path/name"
 }
 
 
@@ -187,7 +200,7 @@ if [ $# -lt 1 ]; then
 	usage
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -202,6 +215,12 @@ while true ; do
 				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
+		-b|--backup) 
+			set_mode "backup"
+			case "$2" in
+				"") LV="$(get_actual_lv)" ; shift 2 ;;
+				*) LV="${2##*/}" ; shift 2 ;;
+			esac ;;
 		-d|--delete) 
 			set_mode "delete" 
 			case "$2" in
@@ -209,6 +228,12 @@ while true ; do
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
 		-l|--list) set_mode "list" ; shift ;;
+		-r|--rename)
+			set_mode "rename"
+			case "$2" in
+				"") shift 2 ;;
+				*) LV="${2##*/}" ; shift 2 ;;
+			esac ;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
@@ -217,6 +242,14 @@ while true ; do
 			case "$2" in
 				"") shift 2 ;;
 				*) FS="${2}" ; shift 2 ;;
+			esac ;;
+		-p|--path)
+			case "$2" in
+				"") shift 2 ;;
+				*)
+					[ -z ${2##*/} ] && SAVE_NAME="$(get_actual_lv)" || SAVE_NAME="${2##*/}"
+					[ -d ${2%/*} ] && SAVE_PATH="${2%/*}" || SAVE_PATH=`pwd`
+					shift 2 ;;
 			esac ;;
 		# provide a name for a new sys
 		-n|--name)
@@ -228,6 +261,11 @@ while true ; do
 		*) echo "Internal error!" ; exit 1 ;;
 	esac
 done
+
+if [ -z ${MODE} ]; then
+	echo "You have to choose a mode"
+	exit 1
+fi
 
 case "$MODE" in
 	list)
@@ -272,5 +310,41 @@ case "$MODE" in
 			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
 		fi
 		mode_clone
+		;;
+	rename) 
+		if [ -z ${LV} ]; then
+			echo "No sys given! Exit!"
+			exit 1
+		elif ! [ -b "${DEVLV}/${LV}" ]; then
+			echo "${LV} not found. Exit!"
+			exit 1
+		elif [ ${LV} == $(get_actual_lv) ];then
+			echo "Can't rename running sys"
+			exit 1
+		fi
+
+		if [ -z ${CLONE_NAME} ]; then
+			echo "No name given. Exit!"
+			exit 1
+		elif [ -b "${DEVLV}/${CLONE_NAME}" ]; then
+			echo "Sys already exist. Exit!"
+			exit 1
+		fi
+		mode_rename
+		;;
+	backup)
+		[ -z ${SAVE_PATH} ] && SAVE_PATH=`pwd`
+		[ -z ${SAVE_NAME} ] && SAVE_NAME="${LV}"
+
+		if ! [ -d ${SAVE_PATH} ]; then
+			echo "${SAVE_PATH} doesn't exist. Exit!"
+			exit 1
+		elif ! [ -w ${SAVE_PATH} ]; then
+			echo "No write permissions in ${SAVE_PATH}. Exit!"
+			exit 1
+		elif [ -e "${SAVE_PATH}/${SAVE_NAME}.gz" ]; then
+			read -p "File exists. Overwrite? (Ctrl-C for cancel!)"
+		fi
+		mode_backup
 		;;
 esac
