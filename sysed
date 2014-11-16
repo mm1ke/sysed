@@ -23,14 +23,13 @@
 # Discription:
 # sysed - for editing root lvm systems like:
 # 	* cloneing
-#	* listing
+#	* backup/restore
 #	* deleting
 
 # TODO:
 # sysed
 #	- clone with settings size (resize?)
 # 	- resize $lv
-#	- restore gz
 
 
 # programs
@@ -40,7 +39,8 @@ LVRENAME="/sbin/lvrename"
 LVS="/sbin/lvs"
 
 # default vars
-DEVLV="/dev/vg0/"
+VG="vg0"
+DEVLV="/dev/${VG}/"
 GRUB_CFG="/boot/grub/grub.cfg"
 MODE=""
 FS=""
@@ -50,11 +50,11 @@ SAVE=1
 
 grub_edit() {
 	local mode=$1
-	local grub_name=`echo ${CLONE_NAME}|tr '_' ' '`
+	local grub_name=`echo ${NAME}|tr '_' ' '`
 	case "$mode" in
 		add)
 			local grub_kernel=`cat ${GRUB_CFG} | grep ${LV} | cut -d ' ' -f 2`
-			echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} lvm=${CLONE_NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
+			echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
 			;;
 		del)
 			# insert beginning of removal
@@ -86,6 +86,15 @@ mode_backup() {
 	${LVREMOVE} --force ${DEVLV}/${LV}-snapshot
 }
 
+mode_restore() {
+	echo -n "Determine original lv size... "
+	local new_lv_size=`pigz -lt ${RESTORE_FILE} | grep ${RESTORE_NAME} | cut -d' ' -f 2`
+	echo "${new_lv_size}b"
+	${LVCREATE} --size ${new_lv_size}b --name "${NAME}" "${VG}"
+	echo -n "Restoring..."
+	pigz -d ${RESTORE_FILE} | dd of="${DEVLV}/${NAME}"
+}
+
 mode_delete() {
 	if ((${SAVE})); then
 		echo "*** WARNING ***"
@@ -109,33 +118,32 @@ mode_delete() {
 }
 
 mode_rename() {
-	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${CLONE_NAME}"
-	sed -i "s/${LV}/${CLONE_NAME}/g" ${GRUB_CFG}	
+	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
+	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}	
 }
 
 mode_clone() {
-
 	local snapshotsize=10G
 	local copy_size=`${LVS} ${DEVLV}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`
 
 	# create new lv
-	${LVCREATE} --size ${copy_size}b --name "${CLONE_NAME}" "vg0"
+	${LVCREATE} --size ${copy_size}b --name "${NAME}" "${VG}"
 	
 	 # create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
 	if ((${USE_DD})); then
-		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${CLONE_NAME}
+		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
-		mkfs -t ${FS} -q ${DEVLV}/${CLONE_NAME}
+		mkfs -t ${FS} -q ${DEVLV}/${NAME}
 
 		local lv_org="/tmp/$RANDOM"
 		local lv_copy="/tmp/$RANDOM"
 		mkdir -p ${lv_org} ${lv_copy}
 
 		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
-		mount ${DEVLV}/${CLONE_NAME} ${lv_copy}
+		mount ${DEVLV}/${NAME} ${lv_copy}
 
 		rsync -aAX --info=progress2 --exclude={"/tmp/*","/lost+found","/usr/portage/*"} /${lv_org}/* /${lv_copy}/
 		mkdir -p ${lv_copy}/usr/portage/{distfiles,packages}
@@ -151,14 +159,12 @@ mode_clone() {
 	((${INSTALL_GRUB})) && grub_edit add
 }
 
-
-
-
 usage() {
 	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
 	echo -e "\t$0 -d|--delete[LV] [-u]"
 	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
 	echo -e "\t$0 -b|--backup[LV] [-pPATH]"
+	echo -e "\t$0 -w|--restore[FILE] [-nNAME]"
 	echo -e "\t$0 -l|--list"
 	echo 
 	echo "Clone Options:"
@@ -175,6 +181,9 @@ usage() {
 	echo
 	echo "Backup Options"
 	echo -e " -p|--path [PATH]\tsave backup to path/name"
+	echo
+	echo "Restore Options"
+	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
 }
 
 
@@ -198,9 +207,10 @@ set_mode(){
 # start here
 if [ $# -lt 1 ]; then
 	usage
+	exit
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -234,6 +244,16 @@ while true ; do
 				"") shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
+		-w|--restore) 
+			set_mode "restore" 
+			case "$2" in
+				"") shift 2 ;;
+				*) 
+					RESTORE_FILE="${2}" 
+					RESTORE_NAME="$(echo ${2##*/})"
+					RESTORE_NAME="$(echo ${RESTORE_NAME%%.*})"
+					shift 2 ;;
+			esac ;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
@@ -255,7 +275,7 @@ while true ; do
 		-n|--name)
 			case "$2" in
 				"") shift 2 ;;
-				*) CLONE_NAME=`echo $2|tr ' ' '_'|tr '[:upper:]' '[:lower:]'` ; shift 2 ;;
+				*) NAME=`echo $2|tr ' ' '_'|tr '[:upper:]' '[:lower:]'` ; shift 2 ;;
 			esac ;;
 		--) shift ; break ;;
 		*) echo "Internal error!" ; exit 1 ;;
@@ -272,37 +292,37 @@ case "$MODE" in
 		mode_list
 		;;
 	delete)
-		if [ -z $LV ]; then
+		if [ -z ${LV} ]; then
 			echo "No sys given! Exit!"
 			exit 1
 		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "$LV not found. Exit!"
+			echo "\"${DEVLV}/${LV}\" not found. Exit!"
 			exit 1
-		elif [ $LV == $(get_actual_lv) ];then
-			echo "Can't delete running sys"
+		elif [ ${LV} == $(get_actual_lv) ];then
+			echo "Can't delete running system"
 			exit 1
 		fi
 		mode_delete
 		;;
 	clone)
-		if [ -z $LV ]; then
+		if [ -z ${LV} ]; then
 			echo "No sys given! Exit!"
 			exit 1
 		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "Couldn't found ${LV}. Exit!"
+			echo "\"${DEVLV}/${LV}\" not found. Exit!"
 			exit 1
 		fi
 
-		if [ -z $CLONE_NAME ]; then
+		if [ -z ${NAME} ]; then
 			echo "No name given. Exit!"
 			exit 1
-		elif [ -b "${DEVLV}/${CLONE_NAME}" ]; then
-			echo "Sys already in use. Exit!"
+		elif [ -b "${DEVLV}/${NAME}" ]; then
+			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
 			exit 1
 		fi
 		if ! [ -z ${FS} ]; then
 			if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
-				echo "Invalid fs. Support are: ext2, ext3, ext4, jfs"
+				echo "\"${FS}\": Invalid fs. Support are: ext2, ext3, ext4, jfs"
 				exit 1
 			fi
 		else
@@ -316,18 +336,18 @@ case "$MODE" in
 			echo "No sys given! Exit!"
 			exit 1
 		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "${LV} not found. Exit!"
+			echo "\"${DEVLV}/${LV}\" not found. Exit!"
 			exit 1
 		elif [ ${LV} == $(get_actual_lv) ];then
 			echo "Can't rename running sys"
 			exit 1
 		fi
 
-		if [ -z ${CLONE_NAME} ]; then
+		if [ -z ${NAME} ]; then
 			echo "No name given. Exit!"
 			exit 1
-		elif [ -b "${DEVLV}/${CLONE_NAME}" ]; then
-			echo "Sys already exist. Exit!"
+		elif [ -b "${DEVLV}/${NAME}" ]; then
+			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
 			exit 1
 		fi
 		mode_rename
@@ -337,14 +357,26 @@ case "$MODE" in
 		[ -z ${SAVE_NAME} ] && SAVE_NAME="${LV}"
 
 		if ! [ -d ${SAVE_PATH} ]; then
-			echo "${SAVE_PATH} doesn't exist. Exit!"
+			echo "\"${SAVE_PATH}\" doesn't exist. Exit!"
 			exit 1
 		elif ! [ -w ${SAVE_PATH} ]; then
-			echo "No write permissions in ${SAVE_PATH}. Exit!"
+			echo "No write permissions on \"${SAVE_PATH}\". Exit!"
 			exit 1
 		elif [ -e "${SAVE_PATH}/${SAVE_NAME}.gz" ]; then
 			read -p "File exists. Overwrite? (Ctrl-C for cancel!)"
 		fi
 		mode_backup
+		;;
+	restore)
+		[ -z ${NAME} ] && NAME="${RESTORE_NAME}"
+
+		if ! [ -e ${RESTORE_FILE} ]; then
+			echo "File doesn't exsist. Exit!"
+			exit 1
+		elif [ -e "${DEVLV}/${NAME}" ]; then
+			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
+			exit 1
+		fi
+		mode_restore
 		;;
 esac
