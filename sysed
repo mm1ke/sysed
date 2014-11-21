@@ -80,6 +80,42 @@ mode_list() {
 	lvs | egrep -i -v "sys|LV"
 }
 
+mode_edit() {
+
+	local mountpoint="/tmp/mp-${RANDOM}"
+	mkdir -p "${mountpoint}"
+	local oldifs=${IFS}
+
+
+	if ((${DELETE_FILE})); then
+		read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+		echo -n "Deleting"
+		IFS=","
+		for l in ${LVNAMES}; do
+			echo -n "."	
+			mount "${DEVLV}/${l}" ${mountpoint}
+			rm "${mountpoint}/${EDIT_FILE}"
+			umount ${mountpoint}
+		done
+		IFS=${oldifs}
+		echo "Done!"
+	elif ((${UPDATE_FILE})); then
+		read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+		echo -n "Replacing"
+		IFS=","
+		for l in ${LVNAMES}; do
+			echo -n "."
+			mount "${DEVLV}/${l}" ${mountpoint}
+			cp ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
+			umount ${mountpoint}
+		done
+		IFS=${oldifs}
+		echo "Done!"
+	fi
+
+	rm -rf ${mountpoint}
+}
+
 mode_backup() {
 	local snapshotsize=10G
 	# create snapshot
@@ -170,6 +206,7 @@ usage() {
 	echo -e "\t$0 -b|--backup[LV] [-pPATH]"
 	echo -e "\t$0 -w|--restore[FILE] [-nNAME]"
 	echo -e "\t$0 -l|--list"
+	echo -e "\t$0 -i|--edit[FILE] -v[LVs] [-x] [-e]"
 	echo 
 	echo "Clone Options:"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
@@ -188,6 +225,13 @@ usage() {
 	echo
 	echo "Restore Options"
 	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
+	echo
+	echo "Edit Options"
+	echo -e " -x|--remove\t\tRemove files from given lvs"
+	echo -e " -e|--update\t\tUpdate files from given lvs"
+	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
+
+	# -e[LV] resize / -s size
 }
 
 
@@ -214,7 +258,7 @@ if [ $# -lt 1 ]; then
 	exit
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -258,10 +302,23 @@ while true ; do
 					RESTORE_NAME="$(echo ${RESTORE_NAME%%.*})"
 					shift 2 ;;
 			esac ;;
+		-t|--edit)
+			set_mode "edit"
+			case "$2" in
+				"") shift 2 ;;
+				*) EDIT_FILE="${2}"; shift 2 ;;
+			esac;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
 		-a|--alternate) USE_DD=1; shift ;;
+		-x|--remove) DELETE_FILE=1; shift ;;
+		-e|--update) UPDATE_FILE=1; shift ;;
+		-v|--lv)
+			case "$2" in
+				"") shift 2 ;;
+				*) LVNAMES="${2}" ; shift 2 ;;
+			esac ;;
 		-f|--fs)
 			case "$2" in
 				"") shift 2 ;;
@@ -291,96 +348,79 @@ if [ -z ${MODE} ]; then
 	exit 1
 fi
 
+# test if User tries to use actual running system
+test_running_sys() { if [ ${LV} == $(get_actual_lv) ]; then echo "Can't use running system. Exit!"; exit 1; fi }
+# test if User has passed a system name
+test_lv() { if [ -z ${LV} ]; then echo "No sys given. Exit!"; exit; fi }
+# test if User's passed system name exists
+test_devlv() { if ! [ -b "${DEVLV}/${LV}" ]; then echo "\"${DEVLV}/${LV}\" not found. Exit!"; exit 1; fi }
+# test if User has passed a name
+test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
+# test if User's passed name already exists
+test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${LV}\" already in use. Exit!"; exit 1; fi }
+
 case "$MODE" in
 	list)
 		mode_list
 		;;
 	delete)
-		if [ -z ${LV} ]; then
-			echo "No sys given! Exit!"
-			exit 1
-		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "\"${DEVLV}/${LV}\" not found. Exit!"
-			exit 1
-		elif [ ${LV} == $(get_actual_lv) ];then
-			echo "Can't delete running system"
-			exit 1
-		fi
+		test_lv; test_devlv; test_running_sys
+
 		mode_delete
 		;;
 	clone)
-		if [ -z ${LV} ]; then
-			echo "No sys given! Exit!"
-			exit 1
-		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "\"${DEVLV}/${LV}\" not found. Exit!"
-			exit 1
-		fi
+		test_lv; test_devlv; test_name; test_used_name
 
-		if [ -z ${NAME} ]; then
-			echo "No name given. Exit!"
-			exit 1
-		elif [ -b "${DEVLV}/${NAME}" ]; then
-			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
-			exit 1
-		fi
 		if ! [ -z ${FS} ]; then
 			if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
-				echo "\"${FS}\": Invalid fs. Support are: ext2, ext3, ext4, jfs"
+				echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs"
 				exit 1
 			fi
 		else
 			# use fs of the original sys
 			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
 		fi
+
 		mode_clone
 		;;
-	rename) 
-		if [ -z ${LV} ]; then
-			echo "No sys given! Exit!"
-			exit 1
-		elif ! [ -b "${DEVLV}/${LV}" ]; then
-			echo "\"${DEVLV}/${LV}\" not found. Exit!"
-			exit 1
-		elif [ ${LV} == $(get_actual_lv) ];then
-			echo "Can't rename running sys"
-			exit 1
-		fi
+	rename)
+		test_lv; test_devlv; test_running_sys; test_name; test_used_name
 
-		if [ -z ${NAME} ]; then
-			echo "No name given. Exit!"
-			exit 1
-		elif [ -b "${DEVLV}/${NAME}" ]; then
-			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
-			exit 1
-		fi
 		mode_rename
 		;;
 	backup)
 		[ -z ${SAVE_PATH} ] && SAVE_PATH=`pwd`
 		[ -z ${SAVE_NAME} ] && SAVE_NAME="${LV}"
 
-		if ! [ -d ${SAVE_PATH} ]; then
-			echo "\"${SAVE_PATH}\" doesn't exist. Exit!"
-			exit 1
-		elif ! [ -w ${SAVE_PATH} ]; then
-			echo "No write permissions on \"${SAVE_PATH}\". Exit!"
-			exit 1
-		elif [ -e "${SAVE_PATH}/${SAVE_NAME}.gz" ]; then
-			read -p "File exists. Overwrite? (Ctrl-C for cancel!)"
-		fi
+		if [ -d ${SAVE_PATH} ]; then echo "\"${SAVE_PATH}\" doesn't exist. Exit!"; exit 1; fi
+		if ! [ -w ${SAVE_PATH} ]; then echo "No write permissions on \"${SAVE_PATH}\". Exit!"; exit 1; fi
+		if [ -e "${SAVE_PATH}/${SAVE_NAME}.gz" ]; then read -p "File exists. Overwrite? (Ctrl-C for cancel!)"; fi
+
 		mode_backup
 		;;
 	restore)
 		[ -z ${NAME} ] && NAME="${RESTORE_NAME}"
+		
+		test_used_name
+		if ! [ -e ${RESTORE_FILE} ]; then echo "File doesn't exsist. Exit!"; exit 1; fi
 
-		if ! [ -e ${RESTORE_FILE} ]; then
-			echo "File doesn't exsist. Exit!"
-			exit 1
-		elif [ -e "${DEVLV}/${NAME}" ]; then
-			echo "\"${DEVLV}/${LV}\" already in use. Exit!"
-			exit 1
-		fi
 		mode_restore
 		;;
+	edit)
+		[ ${LVNAMES} == "all" ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys|$(get_actual_lv)"|tr '\n' ','`
+
+		if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
+		if [ -z ${LVNAMES} ]; then echo "No Sys'es set for editing. Exit!"; exit 1; fi
+		if [ "${DELETE_FILE}" == "${UPDATE_FILE}" ]; then echo "You have to set either delete(-x) OR update(-e)"; exit 1; fi
+
+		oldifs="${IFS}"
+		IFS=","
+		for i in ${LVNAMES}; do
+			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+		done
+		IFS=${oldifs}
+
+		mode_edit
+		;;
+
 esac
