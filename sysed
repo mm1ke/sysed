@@ -31,8 +31,8 @@
 #	- clone with settings size (resize?)
 # 	- resize $lv
 #	- backup/restore/delete multiple
-#	- config change
 #	- systemd support
+# 	- backup tar.gz
 
 
 # programs
