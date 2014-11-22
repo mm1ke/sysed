@@ -10,29 +10,29 @@
 # modify it under the terms of the GNU General Public License
 # as published by the Free Software Foundation; either version 2
 # of the License, or (at your option) any later version.
-# 
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 # Discription:
 # sysed - for editing root lvm systems like:
-# 	* cloneing
+#	* cloneing
 #	* backup/restore
 #	* deleting
 
 # TODO:
 # sysed
 #	- clone with settings size (resize?)
-# 	- resize $lv
+#	- resize $lv
 #	- backup/restore/delete multiple
 #	- systemd support
-# 	- backup tar.gz
+#	- backup tar.gz
 
 
 # programs
@@ -112,7 +112,7 @@ mode_edit() {
 		echo -n "Deleting"
 		IFS=","
 		for l in ${LVNAMES}; do
-			echo -n "."	
+			echo -n "."
 			mount "${DEVLV}/${l}" ${mountpoint}
 			rm "${mountpoint}/${EDIT_FILE}"
 			umount ${mountpoint}
@@ -191,7 +191,7 @@ mode_delete() {
 
 mode_rename() {
 	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
-	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}	
+	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}
 }
 
 mode_clone() {
@@ -200,7 +200,7 @@ mode_clone() {
 
 	# create new lv
 	${LVCREATE} --size ${copy_size}b --name "${NAME}" "${VG}"
-	
+
 	 # create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
@@ -240,13 +240,13 @@ usage() {
 	echo -e "\t$0 -l|--list"
 	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
 	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
-	echo 
+	echo
 	echo "Clone Options:"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
 	echo -e " -f|--fs\t\t\troot filestyem type"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
-	echo 
+	echo
 	echo "Delete Options:"
 	echo -e " -u|--uninstall\t\tremove grub entry"
 	echo
@@ -275,11 +275,11 @@ usage() {
 
 
 get_actual_lv() {
-        local value
-        value=" $(cat /proc/cmdline) "
-        value="${value##* lvm=}"
-        value="${value%% *}"
-        [ "$value" != "" ] && echo "$value"
+	local value
+	value=" $(cat /proc/cmdline) "
+	value="${value##* lvm=}"
+	value="${value%% *}"
+	[ "$value" != "" ] && echo "$value"
 }
 
 set_mode(){
@@ -305,21 +305,21 @@ while true ; do
 	case "$1" in
 		# help
 		-h|--help) usage ; shift ;;
-		# modes 
-		-c|--clone) 
+		# modes
+		-c|--clone)
 			set_mode "clone"
 			case "$2" in
 				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-		-b|--backup) 
+		-b|--backup)
 			set_mode "backup"
 			case "$2" in
 				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-		-d|--delete) 
-			set_mode "delete" 
+		-d|--delete)
+			set_mode "delete"
 			case "$2" in
 				"") shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
@@ -331,12 +331,12 @@ while true ; do
 				"") shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-		-w|--restore) 
-			set_mode "restore" 
+		-w|--restore)
+			set_mode "restore"
 			case "$2" in
 				"") shift 2 ;;
-				*) 
-					RESTORE_FILE="${2}" 
+				*)
+					RESTORE_FILE="${2}"
 					RESTORE_NAME="$(echo ${2##*/})"
 					RESTORE_NAME="$(echo ${RESTORE_NAME%%.*})"
 					shift 2 ;;
