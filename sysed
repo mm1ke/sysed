@@ -33,7 +33,6 @@
 #	- backup/restore/delete multiple
 #	- systemd support
 # 	- backup tar.gz
-# 	- list kernel modules installed
 
 
 # programs
@@ -79,6 +78,26 @@ mode_list() {
 	echo
 	echo "Full list:"
 	lvs | egrep -i -v "sys|LV"
+	echo
+	if ((${KERNEL_MODULES})); then
+
+		local oldifs=${IFS}
+		local mountpoint="/tmp/mp-${RANDOM}"
+		mkdir -p "${mountpoint}"
+
+		IFS=","
+
+		for lv in ${LIST_MODULES}; do
+			mount "${DEVLV}/${lv}" ${mountpoint}
+			ARCH=`file ${mountpoint}/bin/bash | cut -d' ' -f 3`
+			echo -e "* ${lv} (${ARCH})"
+			du -sh ${mountpoint}/lib/modules/*|sed "s|${mountpoint}||g"
+			echo
+			umount ${mountpoint}
+		done
+
+		rm -rf ${mountpoint}
+	fi
 }
 
 mode_edit() {
@@ -243,10 +262,13 @@ usage() {
 	echo "Edit Options"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
 	echo -e " -e|--update\t\tUpdate files from given lvs"
-	echo -e " -v|--lv\t\t\tList of lv to update - seperated by ','"
+	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
 	echo
 	echo "Modules Options"
-	echo -e " -v|--lv\t\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
+	echo -e " -v|--lv\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
+	echo
+	echo "List Options"
+	echo -e " -k|--kernel\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
 
 	# -e[LV] resize / -s size
 }
@@ -275,7 +297,7 @@ if [ $# -lt 1 ]; then
 	exit
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m:: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,modules:: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k:: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel:: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -355,6 +377,12 @@ while true ; do
 					[ -d ${2%/*} ] && SAVE_PATH="${2%/*}" || SAVE_PATH=`pwd`
 					shift 2 ;;
 			esac ;;
+		-k|--kernel)
+			KERNEL_MODULES=1
+			case "$2" in
+				"") LIST_MODULES="all"; shift 2 ;;
+				*) LIST_MODULES="${2}"; shift 2 ;;
+			esac ;;
 		# provide a name for a new sys
 		-n|--name)
 			case "$2" in
@@ -384,6 +412,15 @@ test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${LV}\" al
 
 case "$MODE" in
 	list)
+		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "sys"|tr '\n' ','`
+
+		oldifs="${IFS}"
+		IFS=","
+		for i in ${LIST_MODULES}; do
+			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+		done
+		IFS=${oldifs}
+
 		mode_list
 		;;
 	delete)
