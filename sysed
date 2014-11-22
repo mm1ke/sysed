@@ -111,6 +111,18 @@ mode_edit() {
 		done
 		IFS=${oldifs}
 		echo "Done!"
+	elif ((${UPDATE_MODULES})); then
+		read -p "`echo -e "Rollout module directory \"${MODULES}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue (Ctrl + C for Cancel)"`"
+		echo -n "Rolling out"
+		IFS=","
+		for l in ${LVNAMES}; do
+			echo -n "."
+			mount "${DEVLV}/${l}" ${mountpoint}
+			cp -r ${MODULES} "${mountpoint}/lib/modules/"
+			umount ${mountpoint}
+		done
+		IFS=${oldifs}
+		echo "Done!"
 	fi
 
 	rm -rf ${mountpoint}
@@ -206,12 +218,13 @@ usage() {
 	echo -e "\t$0 -b|--backup[LV] [-pPATH]"
 	echo -e "\t$0 -w|--restore[FILE] [-nNAME]"
 	echo -e "\t$0 -l|--list"
-	echo -e "\t$0 -i|--edit[FILE] -v[LVs] [-x] [-e]"
+	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
+	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
 	echo 
 	echo "Clone Options:"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
-	echo -e " -f|--fs\t\troot filestyem type"
+	echo -e " -f|--fs\t\t\troot filestyem type"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
 	echo 
 	echo "Delete Options:"
@@ -229,7 +242,10 @@ usage() {
 	echo "Edit Options"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
 	echo -e " -e|--update\t\tUpdate files from given lvs"
-	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
+	echo -e " -v|--lv\t\t\tList of lv to update - seperated by ','"
+	echo
+	echo "Modules Options"
+	echo -e " -v|--lv\t\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
 
 	# -e[LV] resize / -s size
 }
@@ -258,7 +274,7 @@ if [ $# -lt 1 ]; then
 	exit
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m:: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,modules:: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -307,7 +323,13 @@ while true ; do
 			case "$2" in
 				"") shift 2 ;;
 				*) EDIT_FILE="${2}"; shift 2 ;;
-			esac;;
+			esac ;;
+		-m|--modules)
+			set_mode "modules"
+			case "$2" in
+				"") MODULES="/lib/modules/$(uname -r)"; shift 2 ;;
+				*) MODULES="${2}" ; shift 2 ;;
+			esac ;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
@@ -408,6 +430,7 @@ case "$MODE" in
 		;;
 	edit)
 		[ ${LVNAMES} == "all" ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys|$(get_actual_lv)"|tr '\n' ','`
+		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
 
 		if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
 		if [ -z ${LVNAMES} ]; then echo "No Sys'es set for editing. Exit!"; exit 1; fi
@@ -422,5 +445,23 @@ case "$MODE" in
 
 		mode_edit
 		;;
+	modules)
+		if ! [ -d "/${MODULES}" ]; then echo "Selected Modules is not a directory. Exit!"; exit 1; fi
+		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys|$(get_actual_lv)"|tr '\n' ','`
+		# remove running sys in case it's specified
+		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
 
+		oldifs="${IFS}"
+		IFS=","
+		for i in ${LVNAMES}; do
+			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+		done
+		IFS=${oldifs}
+
+		UPDATE_FILE=""
+		DELETE_FILE=""
+		UPDATE_MODULES=1
+
+		mode_edit
+		;;
 esac
