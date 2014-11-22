@@ -27,12 +27,11 @@
 #	* deleting
 
 # TODO:
-# sysed
-#	- clone with settings size (resize?)
-#	- resize $lv
-#	- backup/restore/delete multiple
-#	- systemd support
-#	- backup tar.gz
+#- clone with settings size (resize?)
+#- resize $lv
+#- backup/restore/delete multiple
+#- systemd support
+#- backup tar.gz
 
 
 # programs
