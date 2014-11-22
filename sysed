@@ -33,6 +33,7 @@
 #	- backup/restore/delete multiple
 #	- systemd support
 # 	- backup tar.gz
+# 	- list kernel modules installed
 
 
 # programs
