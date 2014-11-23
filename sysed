@@ -27,11 +27,11 @@
 #	* deleting
 
 # TODO:
-#- clone with settings size (resize?)
-#- resize $lv
+#- clone with settings size (resize?) (-s size)
+#- resize $lv (-s size)
 #- backup/restore/delete multiple
 #- systemd support
-#- backup tar.gz
+#- backup tar.gz (use tar.gz default, alternate DD with -a)
 
 
 # programs
@@ -49,27 +49,6 @@ FS=""
 
 # save mode, ask before really delete something
 SAVE=1
-
-grub_edit() {
-	local mode=$1
-	local grub_name=`echo ${NAME}|tr '_' ' '`
-	case "$mode" in
-		add)
-			# use kernel of the original sys
-			local grub_kernel=`cat ${GRUB_CFG} | grep ${LV} | cut -d ' ' -f 2`
-			echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
-			;;
-		del)
-			# insert beginning of removal
-			awk -v pat="${LV}" '{a[NR]=$0;}END{for(i=1;i<=NR;i++){if(a[i+1] ~ pat ){print "<!-- BOF CLEAN -->\n"a[i];}else{print a[i];}}}' ${GRUB_CFG} > /tmp/grub.cfg.tmp
-			# insert end of removal
-			sed -i '/${LV}/{N;N;s/$/\n<!-- EOF CLEAN -->/}' /tmp/grub.cfg.tmp
-			# remove entry
-			sed -i '/<!-- BOF CLEAN -->/,/<!-- EOF CLEAN -->/d' /tmp/grub.cfg.tmp
-			mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
-			;;
-	esac
-}
 
 mode_list() {
 	echo "Actual Running SYS:"
@@ -178,6 +157,7 @@ mode_delete() {
 			else
 				cat ${GRUB_CFG} | grep -A2 -B1 ${LV}
 			fi
+			echo
 		fi
 		${LVREMOVE} "${DEVLV}/${LV}"
 		(($?)) && exit 1
@@ -185,7 +165,16 @@ mode_delete() {
 		${LVREMOVE} --force "${DEVLV}/${LV}"
 	fi
 
-	((${UNINSTALL_GRUB})) && grub_edit del
+	if ((${UNINSTALL_GRUB})); then
+		# insert beginning of removal
+		awk -v pat="${LV}" '{a[NR]=$0;}END{for(i=1;i<=NR;i++){if(a[i+1] ~ pat ){print "<!-- BOF CLEAN -->\n"a[i];}else{print a[i];}}}' ${GRUB_CFG} > /tmp/grub.cfg.tmp
+		# insert end of removal
+		sed -i '/${LV}/{N;N;s/$/\n<!-- EOF CLEAN -->/}' /tmp/grub.cfg.tmp
+		# remove entry
+		sed -i '/<!-- BOF CLEAN -->/,/<!-- EOF CLEAN -->/d' /tmp/grub.cfg.tmp
+		mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
+	fi
+		
 }
 
 mode_rename() {
@@ -227,7 +216,13 @@ mode_clone() {
 	# delete snapshot
 	${LVREMOVE} --force "${DEVLV}/${LV}-snapshot"
 
-	((${INSTALL_GRUB})) && grub_edit add
+	if ((${INSTALL_GRUB})); then
+		local grub_name=`echo ${NAME}|tr '_' ' '`
+		# use kernel of the original sys
+		local grub_kernel=`cat ${GRUB_CFG} | grep ${LV} | cut -d ' ' -f 2`
+		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
+	fi
+		
 }
 
 usage() {
@@ -268,8 +263,6 @@ usage() {
 	echo
 	echo "List Options"
 	echo -e " -k|--kernel\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
-
-	# -e[LV] resize / -s size
 }
 
 
