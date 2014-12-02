@@ -251,7 +251,7 @@ mode_clone() {
 	if ((${INSTALL_GRUB})); then
 		local grub_name=`echo ${NAME}|tr '_' ' '`
 		# use kernel of the original sys
-		local grub_kernel=`cat ${GRUB_CFG} | grep ${LV} | cut -d ' ' -f 2`
+		local grub_kernel=`cat ${GRUB_CFG} | grep -m1 ${LV} | cut -d ' ' -f 2`
 		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
 	fi
 		
