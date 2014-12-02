@@ -56,7 +56,7 @@ mode_list() {
 	get_actual_lv
 	echo
 	echo "Full list:"
-	lvs | egrep -i -v "sys|LV"
+	lvs | egrep -i -v "sys_|LV"
 	echo
 	if ((${KERNEL_MODULES})); then
 
@@ -444,7 +444,7 @@ test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${LV}\" al
 
 case "$MODE" in
 	list)
-		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "sys"|tr '\n' ','`
+		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "sys_"|tr '\n' ','`
 
 		oldifs="${IFS}"
 		IFS=","
@@ -515,7 +515,7 @@ case "$MODE" in
 		mode_restore
 		;;
 	edit)
-		[ ${LVNAMES} == "all" ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys|$(get_actual_lv)"|tr '\n' ','`
+		[ ${LVNAMES} == "all" ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
 		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
 
 		if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
@@ -533,7 +533,7 @@ case "$MODE" in
 		;;
 	modules)
 		if ! [ -d "/${MODULES}" ]; then echo "Selected Modules is not a directory. Exit!"; exit 1; fi
-		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys|$(get_actual_lv)"|tr '\n' ','`
+		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
 		# remove running sys in case it's specified
 		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
 
