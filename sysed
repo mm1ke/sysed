@@ -345,6 +345,8 @@ while true ; do
 				*)
 					RESTORE_FILE="${2}"
 					RESTORE_NAME="$(echo ${2##*/})"
+					FEXT1=${RESTORE_NAME#*.}	# *.tar.gz
+					FEXT2=${RESTORE_NAME##*.}	# *.gz/tgz
 					RESTORE_NAME="$(echo ${RESTORE_NAME%%.*})"
 					shift 2 ;;
 			esac ;;
@@ -470,6 +472,14 @@ case "$MODE" in
 		
 		test_used_name
 		if ! [ -e ${RESTORE_FILE} ]; then echo "File doesn't exsist. Exit!"; exit 1; fi
+
+		if [ "${FEXT1}" == "tar.gz" ] || [ "${FEXT2}" == "tgz" ]; then
+			echo "tar"
+		elif [ "${FEXT2}" == "gz" ]; then
+			echo "dd"
+		else
+			echo "doesn't work"
+		fi
 
 		mode_restore
 		;;
