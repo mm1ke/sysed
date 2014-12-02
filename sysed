@@ -46,6 +46,7 @@ DEVLV="/dev/${VG}/"
 GRUB_CFG="/boot/grub/grub.cfg"
 MODE=""
 FS=""
+CALCULATE_SIZE=""
 
 # save mode, ask before really delete something
 SAVE=1
@@ -131,10 +132,10 @@ mode_backup() {
 	# create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 
+	echo -n "Backuping... "
 	if ((${USE_ALTERNATE})); then
-		echo -n "Compressing..."
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
-	then
+	else
 		local mountpoint="/tmp/mp-${RANDOM}"
 		mkdir -p "${mountpoint}"
 		mount ${DEVLV}/${LV}-snapshot ${mountpoint}
@@ -150,12 +151,30 @@ mode_backup() {
 }
 
 mode_restore() {
-	echo -n "Determine original lv size... "
-	local new_lv_size=`pigz -lt ${RESTORE_FILE} | grep ${RESTORE_NAME} | cut -d' ' -f 2`
-	echo "${new_lv_size}b"
-	${LVCREATE} --size ${new_lv_size}b --name "${NAME}" "${VG}"
+	if ((${CALCULATE_SIZE})); then
+		echo -n "Determine original lv size... "
+		local new_lv_size="`pigz -lt ${RESTORE_FILE} | grep ${RESTORE_NAME} | cut -d' ' -f 2`b"
+		echo "${new_lv_size}"
+	else
+		new_lv_size=${SIZE}
+	fi
+
+	${LVCREATE} --size ${new_lv_size} --name "${NAME}" "${VG}"
 	echo -n "Restoring..."
-	pigz -d ${RESTORE_FILE} | dd of="${DEVLV}/${NAME}"
+
+	if ((${CALCULATE_SIZE})); then
+		pigz -d ${RESTORE_FILE} | dd of="${DEVLV}/${NAME}"
+	else
+		local mountpoint="/tmp/mp-${RANDOM}"
+		mkdir -p "${mountpoint}"
+		mount ${DEVLV}/${LV}-snapshot ${mountpoint}
+
+		tar xvpfz ${RESTORE_FILE} -C "${mountpoint}"
+
+		umount ${mountpoint}
+		rm -rf ${mountpoint}
+	fi
+
 }
 
 mode_delete() {
@@ -304,7 +323,7 @@ if [ $# -lt 1 ]; then
 	exit
 fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k:: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel:: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k::s: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel::,size: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -368,6 +387,10 @@ while true ; do
 		-a|--alternate) USE_ALTERNATE=1; shift ;;
 		-x|--remove) DELETE_FILE=1; shift ;;
 		-e|--update) UPDATE_FILE=1; shift ;;
+		-s|--size)
+			case "$2" in
+				"") shift 2 ;;
+				*) SIZE="${2}" ; shift 2 ;;
 		-v|--lv)
 			case "$2" in
 				"") shift 2 ;;
@@ -469,16 +492,24 @@ case "$MODE" in
 		;;
 	restore)
 		[ -z ${NAME} ] && NAME="${RESTORE_NAME}"
-		
 		test_used_name
+
 		if ! [ -e ${RESTORE_FILE} ]; then echo "File doesn't exsist. Exit!"; exit 1; fi
 
 		if [ "${FEXT1}" == "tar.gz" ] || [ "${FEXT2}" == "tgz" ]; then
-			echo "tar"
+			if [ -z ${SIZE} ]; then
+				echo "No Size given. Exit!"
+				exit 1
+			else
+				if ! [ "${SIZE: -1}" -eg "G" ]; then
+					SIZE="${SIZE}G"
+				fi
+			fi
 		elif [ "${FEXT2}" == "gz" ]; then
-			echo "dd"
+			CALCULATE_SIZE=1
 		else
-			echo "doesn't work"
+			echo "You need to provide a .gz, .tgz, or .tar.gz file in order to proceed"
+			exit 1
 		fi
 
 		mode_restore
