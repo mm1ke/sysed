@@ -130,8 +130,21 @@ mode_backup() {
 	local snapshotsize=10G
 	# create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
-	echo -n "Compressing..."
-	dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
+
+	if ((${USE_ALTERNATE})); then
+		echo -n "Compressing..."
+		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
+	then
+		local mountpoint="/tmp/mp-${RANDOM}"
+		mkdir -p "${mountpoint}"
+		mount ${DEVLV}/${LV}-snapshot ${mountpoint}
+
+		tar --create --use-compress-prog=pigz --same-permissions \
+		--file ${SAVE_PATH}/${SAVE_NAME}.tar.gz ${mountpoint}
+
+		umount ${mountpoint}
+		rm -rf ${mountpoint}
+	fi
 	# delete snapshot
 	${LVREMOVE} --force ${DEVLV}/${LV}-snapshot
 }
@@ -192,7 +205,7 @@ mode_clone() {
 	 # create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
-	if ((${USE_DD})); then
+	if ((${USE_ALTERNATE})); then
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
@@ -229,8 +242,8 @@ usage() {
 	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
 	echo -e "\t$0 -d|--delete[LV] [-u]"
 	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
-	echo -e "\t$0 -b|--backup[LV] [-pPATH]"
-	echo -e "\t$0 -w|--restore[FILE] [-nNAME]"
+	echo -e "\t$0 -b|--backup[LV] [-pPATH] [-a]"
+	echo -e "\t$0 -w|--restore[FILE] [-nNAME] [-s]"
 	echo -e "\t$0 -l|--list"
 	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
 	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
@@ -249,9 +262,11 @@ usage() {
 	echo
 	echo "Backup Options"
 	echo -e " -p|--path [PATH]\tsave backup to path/name"
+	echo -e " -a|--alternate\tuse dd instead of rsync"
 	echo
 	echo "Restore Options"
 	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
+	echo -e " -s|--size [SIZE]\tfor tar.gz files, SIZE of the lv must be provided"
 	echo
 	echo "Edit Options"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
@@ -348,7 +363,7 @@ while true ; do
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
-		-a|--alternate) USE_DD=1; shift ;;
+		-a|--alternate) USE_ALTERNATE=1; shift ;;
 		-x|--remove) DELETE_FILE=1; shift ;;
 		-e|--update) UPDATE_FILE=1; shift ;;
 		-v|--lv)
