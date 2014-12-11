@@ -31,8 +31,6 @@
 #- resize $lv (-s size)
 #- backup/restore/delete multiple
 #- systemd support
-#- backup tar.gz (use tar.gz default, alternate DD with -a)
-
 
 # programs
 LVCREATE="/sbin/lvcreate"
