@@ -55,7 +55,7 @@ mode_list() {
 	echo "Full list:"
 	lvs | egrep -i -v "sys_|LV"
 	echo
-	if ((${KERNEL_MODULES})); then
+	if ((${VERBOSE_OUTPUT})); then
 
 		local oldifs=${IFS}
 		local mountpoint="/tmp/mp-${RANDOM}"
@@ -76,38 +76,22 @@ mode_list() {
 	fi
 }
 
-edit_delete() {
+edit_modify() {
 	local mountpoint="/tmp/mp-${RANDOM}"
 	mkdir -p "${mountpoint}"
 	local oldifs=${IFS}
 
+	((DELETE_FILE)) && local doing="Removing"
+	((UPDATE_FILE)) && local doing="Replacing"
 
-	read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LV}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-	echo -n "Deleting"
+	read -p "`echo -e "${doing} File(s): \"${EDIT_FILE}\" from:\n$(echo ${LV}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+	echo -n "Proceeding"
 	IFS=","
 	for l in ${LV}; do
 		echo -n "."
 		mount "${DEVLV}/${l}" ${mountpoint}
-		rm -rf "${mountpoint}/${EDIT_FILE}"
-		umount ${mountpoint}
-	done
-	IFS=${oldifs}
-	echo "Done!"
-
-	rm -rf ${mountpoint}
-}
-edit_update() {
-	local mountpoint="/tmp/mp-${RANDOM}"
-	mkdir -p "${mountpoint}"
-	local oldifs=${IFS}
-
-	read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LV}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-	echo -n "Replacing"
-	IFS=","
-	for l in ${LV}; do
-		echo -n "."
-		mount "${DEVLV}/${l}" ${mountpoint}
-		cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
+		((DELETE_FILE)) && rm -rf "${mountpoint}/${EDIT_FILE}"
+		((UPDATE_FILE)) && cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
 		umount ${mountpoint}
 	done
 	IFS=${oldifs}
@@ -292,7 +276,6 @@ if [ $# -lt 1 ]; then usage; exit; fi
 # foo: = must have a argument
 # foo:: = argument is optional
 OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch: -n 'sysed' -- "$@"`
-#OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k::s: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel::,size: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -319,13 +302,7 @@ while true ; do
 				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-#		-r|--rename)
-#			set_mode "rename"
-#			case "$2" in
-#				"") shift 2 ;;
-#				*) LV="${2##*/}" ; shift 2 ;;
-#			esac ;;
-		-w|--restore)
+		-r|--restore)
 			set_mode "restore"
 			case "$2" in
 				"") shift 2 ;;
@@ -337,7 +314,7 @@ while true ; do
 					RESTORE_NAME="$(echo ${RESTORE_NAME%%.*})"
 					shift 2 ;;
 			esac ;;
-		-t|--edit)
+		-e|--edit)
 			set_mode "edit"
 			case "$2" in
 				"") shift 2 ;;
@@ -372,11 +349,6 @@ while true ; do
 				"") shift 2 ;;
 				*) SIZE="${2}" ; shift 2 ;;
 			esac ;;
-#		-v|--lv)
-#			case "$2" in
-#				"") shift 2 ;;
-#				*) LVNAMES="${2}" ; shift 2 ;;
-#			esac ;;
 		-f|--fs)
 			case "$2" in
 				"") shift 2 ;;
@@ -391,13 +363,14 @@ while true ; do
 					shift 2 ;;
 			esac ;;
 		-v|--verbose)
-			KERNEL_MODULES=1
+			VERBOSE_OUTPUT=1
 			case "$2" in
 				"") LIST_MODULES="all"; shift 2 ;;
 				*) LIST_MODULES="${2}"; shift 2 ;;
 			esac ;;
 		# provide a name for a new sys
 		-n|--name)
+			USE_NAME=1
 			case "$2" in
 				"") shift 2 ;;
 				*) NAME=`echo $2|tr ' ' '_'|tr '[:upper:]' '[:lower:]'` ; shift 2 ;;
@@ -418,6 +391,15 @@ test_running_sys() { if [ ${LV} == $(get_actual_lv) ]; then echo "Can't use runn
 test_lv() { if [ -z ${LV} ]; then echo "No sys given. Exit!"; exit; fi }
 # test if User's passed system name exists
 test_devlv() { if ! [ -b "${DEVLV}/${LV}" ]; then echo "\"${DEVLV}/${LV}\" not found. Exit!"; exit 1; fi }
+# test if User's passed systems name exists
+test_devlv_multi() {
+	oldifs="${IFS}"
+	IFS=","
+	for i in ${1}; do
+		if ! [ -b "${DEVLV}/${i}" ]; then echo "\"${DEVLV}/${i}\" doesn't exist. Exit!"; exit 1; fi
+	done
+	IFS=${oldifs}
+}
 # test if User has passed a name
 test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 # test if User's passed name already exists
@@ -461,11 +443,6 @@ case "$MODE" in
 
 		mode_clone
 		;;
-#	rename)
-#		test_lv; test_devlv; test_running_sys; test_name; test_used_name
-#
-#		edit_rename
-#		;;
 	backup)
 		[ -z ${SAVE_PATH} ] && SAVE_PATH=`pwd`
 		[ -z ${SAVE_NAME} ] && SAVE_NAME="${LV}"
@@ -507,72 +484,34 @@ case "$MODE" in
 		mode_restore
 		;;
 	edit)
-		# TODO: first check if multiple options are set (not possible!)
-		#if [ "${DELETE_FILE}" == "${UPDATE_FILE}" ]; then echo "You have to set either delete(-x) OR update(-e)"; exit 1; fi
+		let usage_count=$DELETE_FILE + $UPDATE_FILE + $USE_NAME
+		if [ $usage_count -eq 0 ]; then
+			echo "You have to use one option (rename/delete/modify). Exit!"
+			exit 1
+		elif [ $usage_count -gt 1 ]; then
+			echo "You can only use one option. Exit!"
+			exit 1
+		fi
+
 		test_lv
 
-		if ((DELETE_FILE)); then
-			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
-			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
-			if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
-			oldifs="${IFS}"
-			IFS=","
-			for i in ${LV}; do
-				if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
-			done
-			IFS=${oldifs}
-
-			edit_delete
-			echo "delete"
-
-		elif ((UPDATE_FILE)); then
-			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
-			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
-			if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
-			oldifs="${IFS}"
-			IFS=","
-			for i in ${LV}; do
-				if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
-			done
-			IFS=${oldifs}
-
-			edit_update
-			echo "update"
-
-		elif ! [ -z ${NAME} ]; then
+		if ((USE_NAME)); then
 			test_devlv; test_running_sys; test_name; test_used_name
 
 			edit_rename
-			echo "rename"
+		else
+			# create a list of all lv's if "all" is selected
+			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
+			# never modify running lv
+			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
+			if ! [ -e ${EDIT_FILE} ]; then echo "File/dir doesn't exist. Exit!"; exit 1; fi
+
+			test_devlv_multi ${LV}
+			
+			edit_modify
 		fi
-
-
-
-		mode_edit
 		;;
-#	modules)
-#		if ! [ -d "/${MODULES}" ]; then echo "Selected Modules is not a directory. Exit!"; exit 1; fi
-#		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
-#		# remove running sys in case it's specified
-#		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
-#
-#		oldifs="${IFS}"
-#		IFS=","
-#		for i in ${LVNAMES}; do
-#			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
-#		done
-#		IFS=${oldifs}
-#
-#		UPDATE_FILE=""
-#		DELETE_FILE=""
-#		UPDATE_MODULES=1
-#
-#		mode_edit
-#		;;
 esac
-
-
-
 
 #usage() {
 #	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
