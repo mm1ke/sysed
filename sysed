@@ -28,7 +28,6 @@
 
 # TODO:
 #- clone with settings size (resize?) (-s size)
-#- resize $lv (-s size)
 #- backup/restore/delete multiple
 #- systemd support
 
@@ -77,52 +76,48 @@ mode_list() {
 	fi
 }
 
-mode_edit() {
-
+edit_delete() {
 	local mountpoint="/tmp/mp-${RANDOM}"
 	mkdir -p "${mountpoint}"
 	local oldifs=${IFS}
 
 
-	if ((${DELETE_FILE})); then
-		read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-		echo -n "Deleting"
-		IFS=","
-		for l in ${LVNAMES}; do
-			echo -n "."
-			mount "${DEVLV}/${l}" ${mountpoint}
-			rm "${mountpoint}/${EDIT_FILE}"
-			umount ${mountpoint}
-		done
-		IFS=${oldifs}
-		echo "Done!"
-	elif ((${UPDATE_FILE})); then
-		read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-		echo -n "Replacing"
-		IFS=","
-		for l in ${LVNAMES}; do
-			echo -n "."
-			mount "${DEVLV}/${l}" ${mountpoint}
-			cp ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
-			umount ${mountpoint}
-		done
-		IFS=${oldifs}
-		echo "Done!"
-	elif ((${UPDATE_MODULES})); then
-		read -p "`echo -e "Rollout module directory \"${MODULES}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue (Ctrl + C for Cancel)"`"
-		echo -n "Rolling out"
-		IFS=","
-		for l in ${LVNAMES}; do
-			echo -n "."
-			mount "${DEVLV}/${l}" ${mountpoint}
-			cp -r ${MODULES} "${mountpoint}/lib/modules/"
-			umount ${mountpoint}
-		done
-		IFS=${oldifs}
-		echo "Done!"
-	fi
+	read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LV}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+	echo -n "Deleting"
+	IFS=","
+	for l in ${LV}; do
+		echo -n "."
+		mount "${DEVLV}/${l}" ${mountpoint}
+		rm -rf "${mountpoint}/${EDIT_FILE}"
+		umount ${mountpoint}
+	done
+	IFS=${oldifs}
+	echo "Done!"
 
 	rm -rf ${mountpoint}
+}
+edit_update() {
+	local mountpoint="/tmp/mp-${RANDOM}"
+	mkdir -p "${mountpoint}"
+	local oldifs=${IFS}
+
+	read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LV}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+	echo -n "Replacing"
+	IFS=","
+	for l in ${LV}; do
+		echo -n "."
+		mount "${DEVLV}/${l}" ${mountpoint}
+		cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
+		umount ${mountpoint}
+	done
+	IFS=${oldifs}
+	echo "Done!"
+
+	rm -rf ${mountpoint}
+}
+edit_rename() {
+	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
+	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}
 }
 
 mode_backup() {
@@ -154,7 +149,7 @@ mode_restore() {
 		local new_lv_size="`pigz -lt ${RESTORE_FILE} | grep ${RESTORE_NAME} | cut -d' ' -f 2`b"
 		echo "${new_lv_size}"
 	else
-		new_lv_size=${SIZE}
+		local new_lv_size=${SIZE}
 	fi
 
 	${LVCREATE} --size ${new_lv_size} --name "${NAME}" "${VG}"
@@ -173,7 +168,6 @@ mode_restore() {
 		umount ${mountpoint}
 		rm -rf ${mountpoint}
 	fi
-
 }
 
 mode_delete() {
@@ -206,11 +200,6 @@ mode_delete() {
 		mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
 	fi
 		
-}
-
-mode_rename() {
-	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
-	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}
 }
 
 mode_clone() {
@@ -253,54 +242,38 @@ mode_clone() {
 		local grub_kernel=`cat ${GRUB_CFG} | grep -m1 ${LV} | cut -d ' ' -f 2`
 		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
 	fi
-		
 }
 
 usage() {
-	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
-	echo -e "\t$0 -d|--delete[LV] [-u]"
-	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
-	echo -e "\t$0 -b|--backup[LV] [-pPATH] [-a]"
-	echo -e "\t$0 -w|--restore[FILE] [-nNAME] [-s]"
-	echo -e "\t$0 -l|--list"
-	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
-	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
-	echo
-	echo "Clone Options:"
+	echo -e "$0 -c|--clone[LV] [-n] ([-i] (( [-a] || [-f] [-s] )) )"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
-	echo -e " -f|--fs\t\t\troot filestyem type"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
+	echo -e " -f|--fs\t\t\troot filestyem type"
+	echo -e " -s|--size\tSize of the new sys"
 	echo
-	echo "Delete Options:"
+	echo -e "$0 -d|--delete[LV] [-u]"
 	echo -e " -u|--uninstall\t\tremove grub entry"
 	echo
-	echo "Rename Options:"
-	echo -e " -n|--name [NAME]\tnew name of the sys (REQUIRED)"
-	echo
-	echo "Backup Options"
+	echo -e "$0 -b|--backup[LV] [-pPATH] [-a]"
 	echo -e " -p|--path [PATH]\tsave backup to path/name"
 	echo -e " -a|--alternate\tuse dd instead of rsync"
 	echo
-	echo "Restore Options"
+	echo -e "$0 -w|--restore[FILE] [-nNAME] [-s]"
 	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
 	echo -e " -s|--size [SIZE]\tfor tar.gz files, SIZE of the lv must be provided"
 	echo -e " -f|--fs\t\t\troot filestyem type"
 	echo
-	echo "Edit Options"
+	echo -e "$0 -l|--list"
+	echo -e " -v|--verbose\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
+	echo
+	echo -e "$0 -t|--edit[LV] -n[NAME] [-xFILE] [-eFILE/DIR]"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
-	echo -e " -e|--update\t\tUpdate files from given lvs"
-	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
-	echo
-	echo "Modules Options"
-	echo -e " -v|--lv\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
-	echo
-	echo "List Options"
-	echo -e " -k|--kernel\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
+	echo -e " -t|--touch\t\tTouch files/replace directories"
+	echo -e " -n|--name\t\tRename lv to given name"
 }
 
-
-get_actual_lv() {
+get_actual_lv(){
 	local value
 	value=" $(cat /proc/cmdline) "
 	value="${value##* lvm=}"
@@ -308,22 +281,18 @@ get_actual_lv() {
 	[ "$value" != "" ] && echo "$value"
 }
 
-set_mode(){
-	if [ -z ${MODE} ]; then
-		MODE="$1"
-	else
-		echo "Mode ${MODE} already used. Exiting!"
-		exit 1
-	fi
-}
+# check mode
+set_mode(){ if [ -z ${MODE} ]; then MODE="$1"; else echo "Mode ${MODE} already used. Exiting!"; exit 1; fi }
 
 # start here
-if [ $# -lt 1 ]; then
-	usage
-	exit
-fi
+# check for args
+if [ $# -lt 1 ]; then usage; exit; fi
 
-OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k::s: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel::,size: -n 'sysed' -- "$@"`
+# foo = no argument
+# foo: = must have a argument
+# foo:: = argument is optional
+OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch: -n 'sysed' -- "$@"`
+#OPTS=`getopt -o hc::d:liuaf:n:r:b::p:w:t:xev:m::k::s: --long help,clone::,delete:,list,install,uninstall,alternate,fs:,name:,rename:,backup::,path:,restore:,edit:,remove,update,lv,kernel::,size: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -338,25 +307,24 @@ while true ; do
 				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-		-b|--backup)
-			set_mode "backup"
-			case "$2" in
-				"") LV="$(get_actual_lv)" ; shift 2 ;;
-				*) LV="${2##*/}" ; shift 2 ;;
-			esac ;;
 		-d|--delete)
 			set_mode "delete"
 			case "$2" in
 				"") shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
-		-l|--list) set_mode "list" ; shift ;;
-		-r|--rename)
-			set_mode "rename"
+		-b|--backup)
+			set_mode "backup"
 			case "$2" in
-				"") shift 2 ;;
+				"") LV="$(get_actual_lv)" ; shift 2 ;;
 				*) LV="${2##*/}" ; shift 2 ;;
 			esac ;;
+#		-r|--rename)
+#			set_mode "rename"
+#			case "$2" in
+#				"") shift 2 ;;
+#				*) LV="${2##*/}" ; shift 2 ;;
+#			esac ;;
 		-w|--restore)
 			set_mode "restore"
 			case "$2" in
@@ -373,30 +341,42 @@ while true ; do
 			set_mode "edit"
 			case "$2" in
 				"") shift 2 ;;
-				*) EDIT_FILE="${2}"; shift 2 ;;
+				*) LV="${2##*/}" ; shift 2 ;;
+				#*) EDIT_FILE="${2}"; shift 2 ;;
 			esac ;;
-		-m|--modules)
-			set_mode "modules"
-			case "$2" in
-				"") MODULES="/lib/modules/$(uname -r)"; shift 2 ;;
-				*) MODULES="${2}" ; shift 2 ;;
-			esac ;;
+		-l|--list) set_mode "list" ; shift ;;
+#		-m|--modules)
+#			set_mode "modules"
+#			case "$2" in
+#				"") MODULES="/lib/modules/$(uname -r)"; shift 2 ;;
+#				*) MODULES="${2}" ; shift 2 ;;
+#			esac ;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
 		-a|--alternate) USE_ALTERNATE=1; shift ;;
-		-x|--remove) DELETE_FILE=1; shift ;;
-		-e|--update) UPDATE_FILE=1; shift ;;
+		-x|--remove)
+			DELETE_FILE=1
+			case "$2" in
+				"") shift 2 ;;
+				*) EDIT_FILE="${2}"; shift 2 ;;
+			esac ;;
+		-t|--touch)
+			UPDATE_FILE=1
+			case "$2" in
+				"") shift 2 ;;
+				*) EDIT_FILE="${2}"; shift 2 ;;
+			esac ;;
 		-s|--size)
 			case "$2" in
 				"") shift 2 ;;
 				*) SIZE="${2}" ; shift 2 ;;
 			esac ;;
-		-v|--lv)
-			case "$2" in
-				"") shift 2 ;;
-				*) LVNAMES="${2}" ; shift 2 ;;
-			esac ;;
+#		-v|--lv)
+#			case "$2" in
+#				"") shift 2 ;;
+#				*) LVNAMES="${2}" ; shift 2 ;;
+#			esac ;;
 		-f|--fs)
 			case "$2" in
 				"") shift 2 ;;
@@ -410,7 +390,7 @@ while true ; do
 					[ -d ${2%/*} ] && SAVE_PATH="${2%/*}" || SAVE_PATH=`pwd`
 					shift 2 ;;
 			esac ;;
-		-k|--kernel)
+		-v|--verbose)
 			KERNEL_MODULES=1
 			case "$2" in
 				"") LIST_MODULES="all"; shift 2 ;;
@@ -442,6 +422,14 @@ test_devlv() { if ! [ -b "${DEVLV}/${LV}" ]; then echo "\"${DEVLV}/${LV}\" not f
 test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 # test if User's passed name already exists
 test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${LV}\" already in use. Exit!"; exit 1; fi }
+# test if given FS type can be used
+test_fs(){
+	if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
+		echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs"
+		exit 1
+	fi
+}
+
 
 case "$MODE" in
 	list)
@@ -465,10 +453,7 @@ case "$MODE" in
 		test_lv; test_devlv; test_name; test_used_name
 
 		if ! [ -z ${FS} ]; then
-			if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
-				echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs"
-				exit 1
-			fi
+			test_fs
 		else
 			# use fs of the original sys
 			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
@@ -476,11 +461,11 @@ case "$MODE" in
 
 		mode_clone
 		;;
-	rename)
-		test_lv; test_devlv; test_running_sys; test_name; test_used_name
-
-		mode_rename
-		;;
+#	rename)
+#		test_lv; test_devlv; test_running_sys; test_name; test_used_name
+#
+#		edit_rename
+#		;;
 	backup)
 		[ -z ${SAVE_PATH} ] && SAVE_PATH=`pwd`
 		[ -z ${SAVE_NAME} ] && SAVE_NAME="${LV}"
@@ -498,14 +483,11 @@ case "$MODE" in
 		if ! [ -e ${RESTORE_FILE} ]; then echo "File doesn't exsist. Exit!"; exit 1; fi
 
 		if [ "${FEXT1}" == "tar.gz" ] || [ "${FEXT2}" == "tgz" ]; then
-			if [ -z ${FS} ]; then
+			if ! [ -z ${FS} ]; then
+				test_fs
+			else
 				echo "No Filesystem given. Exit!"
 				exit 1
-			else
-				if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
-					echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs"
-					exit 1
-				fi
 			fi
 			if [ -z ${SIZE} ]; then
 				echo "No Size given. Exit!"
@@ -525,39 +507,161 @@ case "$MODE" in
 		mode_restore
 		;;
 	edit)
-		[ ${LVNAMES} == "all" ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
-		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
+		# TODO: first check if multiple options are set (not possible!)
+		#if [ "${DELETE_FILE}" == "${UPDATE_FILE}" ]; then echo "You have to set either delete(-x) OR update(-e)"; exit 1; fi
+		test_lv
 
-		if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
-		if [ -z ${LVNAMES} ]; then echo "No Sys'es set for editing. Exit!"; exit 1; fi
-		if [ "${DELETE_FILE}" == "${UPDATE_FILE}" ]; then echo "You have to set either delete(-x) OR update(-e)"; exit 1; fi
+		if ((DELETE_FILE)); then
+			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
+			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
+			if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
+			oldifs="${IFS}"
+			IFS=","
+			for i in ${LV}; do
+				if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+			done
+			IFS=${oldifs}
 
-		oldifs="${IFS}"
-		IFS=","
-		for i in ${LVNAMES}; do
-			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
-		done
-		IFS=${oldifs}
+			edit_delete
+			echo "delete"
+
+		elif ((UPDATE_FILE)); then
+			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
+			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
+			if ! [ -e ${EDIT_FILE} ]; then echo "File doesn't exist. Exit!"; exit 1; fi
+			oldifs="${IFS}"
+			IFS=","
+			for i in ${LV}; do
+				if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+			done
+			IFS=${oldifs}
+
+			edit_update
+			echo "update"
+
+		elif ! [ -z ${NAME} ]; then
+			test_devlv; test_running_sys; test_name; test_used_name
+
+			edit_rename
+			echo "rename"
+		fi
+
+
 
 		mode_edit
 		;;
-	modules)
-		if ! [ -d "/${MODULES}" ]; then echo "Selected Modules is not a directory. Exit!"; exit 1; fi
-		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
-		# remove running sys in case it's specified
-		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
-
-		oldifs="${IFS}"
-		IFS=","
-		for i in ${LVNAMES}; do
-			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
-		done
-		IFS=${oldifs}
-
-		UPDATE_FILE=""
-		DELETE_FILE=""
-		UPDATE_MODULES=1
-
-		mode_edit
-		;;
+#	modules)
+#		if ! [ -d "/${MODULES}" ]; then echo "Selected Modules is not a directory. Exit!"; exit 1; fi
+#		[ -z ${LVNAMES} ] && LVNAMES=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
+#		# remove running sys in case it's specified
+#		LVNAMES=`echo ${LVNAMES}|sed "s/$(get_actual_lv)//g"`
+#
+#		oldifs="${IFS}"
+#		IFS=","
+#		for i in ${LVNAMES}; do
+#			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+#		done
+#		IFS=${oldifs}
+#
+#		UPDATE_FILE=""
+#		DELETE_FILE=""
+#		UPDATE_MODULES=1
+#
+#		mode_edit
+#		;;
 esac
+
+
+
+
+#usage() {
+#	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
+#	echo -e "\t$0 -d|--delete[LV] [-u]"
+#	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
+#	echo -e "\t$0 -b|--backup[LV] [-pPATH] [-a]"
+#	echo -e "\t$0 -w|--restore[FILE] [-nNAME] [-s]"
+#	echo -e "\t$0 -l|--list"
+#	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
+#	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
+#	echo
+#	echo "Clone Options:"
+#	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
+#	echo -e " -i|--install\t\tcreate grub entry"
+#	echo -e " -f|--fs\t\t\troot filestyem type"
+#	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
+#	echo
+#	echo "Delete Options:"
+#	echo -e " -u|--uninstall\t\tremove grub entry"
+#	echo
+#	echo "Rename Options:"
+#	echo -e " -n|--name [NAME]\tnew name of the sys (REQUIRED)"
+#	echo
+#	echo "Backup Options"
+#	echo -e " -p|--path [PATH]\tsave backup to path/name"
+#	echo -e " -a|--alternate\tuse dd instead of rsync"
+#	echo
+#	echo "Restore Options"
+#	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
+#	echo -e " -s|--size [SIZE]\tfor tar.gz files, SIZE of the lv must be provided"
+#	echo -e " -f|--fs\t\t\troot filestyem type"
+#	echo
+#	echo "Edit Options"
+#	echo -e " -x|--remove\t\tRemove files from given lvs"
+#	echo -e " -e|--update\t\tUpdate files from given lvs"
+#	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
+#	echo
+#	echo "Modules Options"
+#	echo -e " -v|--lv\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
+#	echo
+#	echo "List Options"
+#	echo -e " -k|--kernel\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
+#}
+#mode_edit() {
+#
+#	local mountpoint="/tmp/mp-${RANDOM}"
+#	mkdir -p "${mountpoint}"
+#	local oldifs=${IFS}
+#
+#
+#	if ((${DELETE_FILE})); then
+#		read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+#		echo -n "Deleting"
+#		IFS=","
+#		for l in ${LVNAMES}; do
+#			echo -n "."
+#			mount "${DEVLV}/${l}" ${mountpoint}
+#			rm "${mountpoint}/${EDIT_FILE}"
+#			umount ${mountpoint}
+#		done
+#		IFS=${oldifs}
+#		echo "Done!"
+#	elif ((${UPDATE_FILE})); then
+#		read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
+#		echo -n "Replacing"
+#		IFS=","
+#		for l in ${LVNAMES}; do
+#			echo -n "."
+#			mount "${DEVLV}/${l}" ${mountpoint}
+#			cp ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
+#			umount ${mountpoint}
+#		done
+#		IFS=${oldifs}
+#		echo "Done!"
+#	elif ((${UPDATE_MODULES})); then
+#		read -p "`echo -e "Rollout module directory \"${MODULES}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue (Ctrl + C for Cancel)"`"
+#		echo -n "Rolling out"
+#		IFS=","
+#		for l in ${LVNAMES}; do
+#			echo -n "."
+#			mount "${DEVLV}/${l}" ${mountpoint}
+#			cp -r ${MODULES} "${mountpoint}/lib/modules/"
+#			umount ${mountpoint}
+#		done
+#		IFS=${oldifs}
+#		echo "Done!"
+#	fi
+#
+#	rm -rf ${mountpoint}
+#}
+
+
