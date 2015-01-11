@@ -45,6 +45,10 @@ MODE=""
 FS=""
 CALCULATE_SIZE=""
 
+DELETE_FILE=0
+UPDATE_FILE=0
+USE_NAME=0
+
 # save mode, ask before really delete something
 SAVE=1
 
@@ -106,6 +110,12 @@ edit_rename() {
 
 mode_backup() {
 	local snapshotsize=10G
+	if ((${USE_ALTERNATE})); then
+		test_filename "${SAVE_PATH}/${SAVE_NAME}.gz"
+	else
+		test_filename "${SAVE_PATH}/${SAVE_NAME}.tar.gz"
+	fi
+
 	# create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 
@@ -229,29 +239,35 @@ mode_clone() {
 }
 
 usage() {
+	echo -e "* Cloning"
 	echo -e "$0 -c|--clone[LV] [-n] ([-i] (( [-a] || [-f] [-s] )) )"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
-	echo -e " -f|--fs\t\t\troot filestyem type"
-	echo -e " -s|--size\tSize of the new sys"
+	echo -e " -f|--fs\t\troot filestyem type"
+	echo -e " -s|--size\t\tSize of the new sys"
 	echo
+	echo -e "* Deleting"
 	echo -e "$0 -d|--delete[LV] [-u]"
 	echo -e " -u|--uninstall\t\tremove grub entry"
 	echo
+	echo -e "* Backup"
 	echo -e "$0 -b|--backup[LV] [-pPATH] [-a]"
 	echo -e " -p|--path [PATH]\tsave backup to path/name"
-	echo -e " -a|--alternate\tuse dd instead of rsync"
+	echo -e " -a|--alternate\t\tuse dd instead of rsync"
 	echo
-	echo -e "$0 -w|--restore[FILE] [-nNAME] [-s]"
+	echo -e "* Restore"
+	echo -e "$0 -r|--restore[FILE] [-nNAME] [-s]"
 	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
 	echo -e " -s|--size [SIZE]\tfor tar.gz files, SIZE of the lv must be provided"
-	echo -e " -f|--fs\t\t\troot filestyem type"
+	echo -e " -f|--fs\t\troot filestyem type"
 	echo
+	echo -e "* Listing"
 	echo -e "$0 -l|--list"
 	echo -e " -v|--verbose\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
 	echo
-	echo -e "$0 -t|--edit[LV] -n[NAME] [-xFILE] [-eFILE/DIR]"
+	echo -e "* Edit"
+	echo -e "$0 -e|--edit[LV] -n[NAME] [-xFILE] [-eFILE/DIR]"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
 	echo -e " -t|--touch\t\tTouch files/replace directories"
 	echo -e " -n|--name\t\tRename lv to given name"
@@ -403,7 +419,7 @@ test_devlv_multi() {
 # test if User has passed a name
 test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 # test if User's passed name already exists
-test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${LV}\" already in use. Exit!"; exit 1; fi }
+test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${NAME}\" already in use. Exit!"; exit 1; fi }
 # test if given FS type can be used
 test_fs(){
 	if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
@@ -411,7 +427,7 @@ test_fs(){
 		exit 1
 	fi
 }
-
+test_filename(){ if [ -e "${1}" ]; then read -p "File exists. Overwrite? (Ctrl-C for cancel!)"; fi }
 
 case "$MODE" in
 	list)
@@ -433,6 +449,7 @@ case "$MODE" in
 		;;
 	clone)
 		test_lv; test_devlv; test_name; test_used_name
+		#TODO: implement SIZE possibility
 
 		if ! [ -z ${FS} ]; then
 			test_fs
@@ -449,7 +466,6 @@ case "$MODE" in
 
 		if ! [ -d ${SAVE_PATH} ]; then echo "\"${SAVE_PATH}\" doesn't exist. Exit!"; exit 1; fi
 		if ! [ -w ${SAVE_PATH} ]; then echo "No write permissions on \"${SAVE_PATH}\". Exit!"; exit 1; fi
-		if [ -e "${SAVE_PATH}/${SAVE_NAME}.gz" ]; then read -p "File exists. Overwrite? (Ctrl-C for cancel!)"; fi
 
 		mode_backup
 		;;
@@ -484,7 +500,7 @@ case "$MODE" in
 		mode_restore
 		;;
 	edit)
-		let usage_count=$DELETE_FILE + $UPDATE_FILE + $USE_NAME
+		usage_count=$(expr $DELETE_FILE + $UPDATE_FILE + $USE_NAME)
 		if [ $usage_count -eq 0 ]; then
 			echo "You have to use one option (rename/delete/modify). Exit!"
 			exit 1
@@ -504,10 +520,9 @@ case "$MODE" in
 			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
 			# never modify running lv
 			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
-			if ! [ -e ${EDIT_FILE} ]; then echo "File/dir doesn't exist. Exit!"; exit 1; fi
-
 			test_devlv_multi ${LV}
-			
+
+			((UPDATE_FILE)) && if ! [ -e ${EDIT_FILE} ]; then echo "File/dir doesn't exist. Exit!"; exit 1; fi
 			edit_modify
 		fi
 		;;
