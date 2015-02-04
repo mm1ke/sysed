@@ -203,7 +203,7 @@ mode_clone() {
 	# create new lv
 	${LVCREATE} --size ${copy_size}b --name "${NAME}" "${VG}"
 
-	 # create snapshot
+	# create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
 	if ((${USE_ALTERNATE})); then
@@ -527,95 +527,3 @@ case "$MODE" in
 		fi
 		;;
 esac
-
-#usage() {
-#	echo -e "\t$0 -c|--clone[LV] [-i] [-a] [-fFILESYSTEM] [-nNAME]"
-#	echo -e "\t$0 -d|--delete[LV] [-u]"
-#	echo -e "\t$0 -r|--rename[LV] [-nNAME]"
-#	echo -e "\t$0 -b|--backup[LV] [-pPATH] [-a]"
-#	echo -e "\t$0 -w|--restore[FILE] [-nNAME] [-s]"
-#	echo -e "\t$0 -l|--list"
-#	echo -e "\t$0 -t|--edit[FILE] -v[LVs] [-x] [-e]"
-#	echo -e "\t$0 -m|--modules[MODULES] -v[LVs]"
-#	echo
-#	echo "Clone Options:"
-#	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
-#	echo -e " -i|--install\t\tcreate grub entry"
-#	echo -e " -f|--fs\t\t\troot filestyem type"
-#	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
-#	echo
-#	echo "Delete Options:"
-#	echo -e " -u|--uninstall\t\tremove grub entry"
-#	echo
-#	echo "Rename Options:"
-#	echo -e " -n|--name [NAME]\tnew name of the sys (REQUIRED)"
-#	echo
-#	echo "Backup Options"
-#	echo -e " -p|--path [PATH]\tsave backup to path/name"
-#	echo -e " -a|--alternate\tuse dd instead of rsync"
-#	echo
-#	echo "Restore Options"
-#	echo -e " -n|--name [NAME]\tnew name of the sys (DEFAULT: filename)"
-#	echo -e " -s|--size [SIZE]\tfor tar.gz files, SIZE of the lv must be provided"
-#	echo -e " -f|--fs\t\t\troot filestyem type"
-#	echo
-#	echo "Edit Options"
-#	echo -e " -x|--remove\t\tRemove files from given lvs"
-#	echo -e " -e|--update\t\tUpdate files from given lvs"
-#	echo -e " -v|--lv\t\tList of lv to update - seperated by ','"
-#	echo
-#	echo "Modules Options"
-#	echo -e " -v|--lv\t\tList of lv to rollout - seperated by ',' (DEFAULT: all)"
-#	echo
-#	echo "List Options"
-#	echo -e " -k|--kernel\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
-#}
-#mode_edit() {
-#
-#	local mountpoint="/tmp/mp-${RANDOM}"
-#	mkdir -p "${mountpoint}"
-#	local oldifs=${IFS}
-#
-#
-#	if ((${DELETE_FILE})); then
-#		read -p "`echo -e "Remove File: \"${EDIT_FILE}\" from:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-#		echo -n "Deleting"
-#		IFS=","
-#		for l in ${LVNAMES}; do
-#			echo -n "."
-#			mount "${DEVLV}/${l}" ${mountpoint}
-#			rm "${mountpoint}/${EDIT_FILE}"
-#			umount ${mountpoint}
-#		done
-#		IFS=${oldifs}
-#		echo "Done!"
-#	elif ((${UPDATE_FILE})); then
-#		read -p "`echo -e "Replace File: \"${EDIT_FILE}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue? (Ctrl + C for Cancel)"`"
-#		echo -n "Replacing"
-#		IFS=","
-#		for l in ${LVNAMES}; do
-#			echo -n "."
-#			mount "${DEVLV}/${l}" ${mountpoint}
-#			cp ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
-#			umount ${mountpoint}
-#		done
-#		IFS=${oldifs}
-#		echo "Done!"
-#	elif ((${UPDATE_MODULES})); then
-#		read -p "`echo -e "Rollout module directory \"${MODULES}\" on following systems:\n$(echo ${LVNAMES}|tr ',' '\n')\nContinue (Ctrl + C for Cancel)"`"
-#		echo -n "Rolling out"
-#		IFS=","
-#		for l in ${LVNAMES}; do
-#			echo -n "."
-#			mount "${DEVLV}/${l}" ${mountpoint}
-#			cp -r ${MODULES} "${mountpoint}/lib/modules/"
-#			umount ${mountpoint}
-#		done
-#		IFS=${oldifs}
-#		echo "Done!"
-#	fi
-#
-#	rm -rf ${mountpoint}
-#}
-
-
