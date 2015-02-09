@@ -267,7 +267,7 @@ usage() {
 	echo -e " -v|--verbose\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
 	echo
 	echo -e "* Edit"
-	echo -e "$0 -e|--edit[LV] -n[NAME] [-xFILE] [-eFILE/DIR]"
+	echo -e "$0 -e|--edit[LV] -n[NAME] [-xFILE] [-tFILE/DIR]"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
 	echo -e " -t|--touch\t\tTouch files/replace directories"
 	echo -e " -n|--name\t\tRename lv to given name"
