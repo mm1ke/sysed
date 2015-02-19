@@ -41,6 +41,7 @@ LVS="/sbin/lvs"
 VG="vg0"
 DEVLV="/dev/${VG}/"
 GRUB_CFG="/boot/grub/grub.cfg"
+LV_FILTER="sys_"
 MODE=""
 FS=""
 CALCULATE_SIZE=""
@@ -57,7 +58,7 @@ mode_list() {
 	get_actual_lv
 	echo
 	echo "Full list:"
-	lvs | egrep -i -v "sys_|LV"
+	lvs | egrep -i -v "${LV_FILTER}|LV"
 	echo
 	if ((${VERBOSE_OUTPUT})); then
 
@@ -263,14 +264,16 @@ usage() {
 	echo -e " -f|--fs\t\troot filestyem type"
 	echo
 	echo -e "* Listing"
-	echo -e "$0 -l|--list"
+	echo -e "$0 -l|--list ([-i] [-gSTRING])"
 	echo -e " -v|--verbose\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
+	echo -e " -g|--grep\t\tRemove lvs with STRING from list"
 	echo
 	echo -e "* Edit"
-	echo -e "$0 -e|--edit[LV] -n[NAME] [-xFILE] [-tFILE/DIR]"
+	echo -e "$0 -e|--edit[LVs] -n[NAME] [-xFILE] [-tFILE/DIR] [-gSTRING]"
 	echo -e " -x|--remove\t\tRemove files from given lvs"
 	echo -e " -t|--touch\t\tTouch files/replace directories"
 	echo -e " -n|--name\t\tRename lv to given name"
+	echo -e " -g|--grep\t\tRemove lvs with STRING from list"
 }
 
 get_actual_lv(){
@@ -291,7 +294,7 @@ if [ $# -lt 1 ]; then usage; exit; fi
 # foo = no argument
 # foo: = must have a argument
 # foo:: = argument is optional
-OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t:g: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch:,grep: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -370,6 +373,11 @@ while true ; do
 				"") shift 2 ;;
 				*) FS="${2}" ; shift 2 ;;
 			esac ;;
+		-g|--grep)
+			case "$2" in
+				"") shift 2 ;;
+				*) LV_FILTER="${LV_FILTER}|$2"; shift 2;;
+			esac ;;
 		-p|--path)
 			case "$2" in
 				"") shift 2 ;;
@@ -431,7 +439,7 @@ test_filename(){ if [ -e "${1}" ]; then read -p "File exists. Overwrite? (Ctrl-C
 
 case "$MODE" in
 	list)
-		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "sys_"|tr '\n' ','`
+		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "${LV_FILTER}"|tr '\n' ','`
 
 		oldifs="${IFS}"
 		IFS=","
@@ -517,7 +525,7 @@ case "$MODE" in
 			edit_rename
 		else
 			# create a list of all lv's if "all" is selected
-			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "sys_|$(get_actual_lv)"|tr '\n' ','`
+			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "${LV_FILTER}|$(get_actual_lv)"|tr '\n' ','`
 			# never modify running lv
 			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
 			test_devlv_multi ${LV}
