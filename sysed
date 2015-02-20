@@ -79,6 +79,7 @@ mode_list() {
 
 		rm -rf ${mountpoint}
 	fi
+	IFS=$oldifs
 }
 
 edit_modify() {
@@ -104,6 +105,7 @@ edit_modify() {
 
 	rm -rf ${mountpoint}
 }
+
 edit_rename() {
 	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
 	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}
