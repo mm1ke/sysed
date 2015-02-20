@@ -264,7 +264,7 @@ usage() {
 	echo -e " -f|--fs\t\troot filestyem type"
 	echo
 	echo -e "* Listing"
-	echo -e "$0 -l|--list ([-i] [-gSTRING])"
+	echo -e "$0 -l|--list ([-v[LV]] [-gSTRING])"
 	echo -e " -v|--verbose\t\tList kernel modules - seperated by ',' (DEFAULT: all)"
 	echo -e " -g|--grep\t\tRemove lvs with STRING from list"
 	echo
