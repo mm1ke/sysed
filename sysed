@@ -210,6 +210,15 @@ mode_clone() {
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 	echo "Copy..."
 	if ((${USE_ALTERNATE})); then
+
+		# get ARCH
+		local lv_org="/tmp/$RANDOM"
+		mkdir -p ${lv_org}
+		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
+		ARCH=`file ${lv_org}/bin/bash | cut -d' ' -f 3`
+		umount ${lv_org}
+		rm -rf ${lv_org}
+
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
@@ -221,6 +230,8 @@ mode_clone() {
 
 		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
 		mount ${DEVLV}/${NAME} ${lv_copy}
+
+		ARCH=`file ${lv_org}/bin/bash | cut -d' ' -f 3`
 
 		rsync -aAX --info=progress2 --exclude={"/tmp/*","/lost+found","/usr/portage/*"} /${lv_org}/* /${lv_copy}/
 		mkdir -p ${lv_copy}/usr/portage/{distfiles,packages}
@@ -234,10 +245,23 @@ mode_clone() {
 	${LVREMOVE} --force "${DEVLV}/${LV}-snapshot"
 
 	if ((${INSTALL_GRUB})); then
+		case "$ARCH" in
+			32-bit)
+				SUFFIX="x86"
+				;;
+			64-bit)
+				SUFFIX="amd64"
+				;;
+			*)
+				echo "WARNING: No Suffix, please manually change initrd filename!"
+				SUFFIX="CHANGEME"
+				;;
+		esac
+
 		local grub_name=`echo ${NAME}|tr '_' ' '`
 		# use kernel of the original sys
 		local grub_kernel=`cat ${GRUB_CFG} | grep -m1 ${LV} | cut -d ' ' -f 2`
-		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd.cpio.gz\n}" >> ${GRUB_CFG}
+		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd-${SUFFIX}.cpio.gz\n}" >> ${GRUB_CFG}
 	fi
 }
 
