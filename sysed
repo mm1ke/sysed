@@ -155,7 +155,7 @@ mode_restore() {
 	if ((${CALCULATE_SIZE})); then
 		pigz -d ${RESTORE_FILE} | dd of="${DEVLV}/${NAME}"
 	else
-		mkfs -t ${FS} -q ${DEVLV}/${NAME}
+		mkfs -t ${FS} ${DEVLV}/${NAME}
 		local mountpoint="/tmp/mp-${RANDOM}"
 		mkdir -p "${mountpoint}"
 		mount ${DEVLV}/${NAME} ${mountpoint}
@@ -222,7 +222,8 @@ mode_clone() {
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
-		mkfs -t ${FS} -q ${DEVLV}/${NAME}
+		#mkfs -t ${FS} ${DEVLV}/${NAME}
+		mkfs.btrfs -f ${DEVLV}/${NAME}
 
 		local lv_org="/tmp/$RANDOM"
 		local lv_copy="/tmp/$RANDOM"
@@ -456,8 +457,8 @@ test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${NAME}\" already in use. Exit!"; exit 1; fi }
 # test if given FS type can be used
 test_fs(){
-	if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ]; then
-		echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs"
+	if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ] && ! [ ${FS} == "btrfs" ]; then
+		echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs, btrfs"
 		exit 1
 	fi
 }
