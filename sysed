@@ -222,8 +222,27 @@ mode_clone() {
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
-		#mkfs -t ${FS} ${DEVLV}/${NAME}
-		mkfs.btrfs -f ${DEVLV}/${NAME}
+		case "${FS}" in
+			btrfs)
+				mkfs.btrfs -f ${DEVLV}/${NAME}
+				;;
+			ext2)
+				mkfs.ext2 -q ${DEVLV}/${NAME}
+				;;
+			ext3)
+				mkfs.ext3 -q ${DEVLV}/${NAME}
+				;;
+			ext4)
+				mkfs.ext4 -q ${DEVLV}/${NAME}
+				;;
+			jfs)
+				mkfs.jfs -q ${DEVLV}/${NAME}
+				;;
+			*)
+				echo "\"${FS}\" not valid. Arborting!"
+				exit 1
+				;;
+		esac
 
 		local lv_org="/tmp/$RANDOM"
 		local lv_copy="/tmp/$RANDOM"
