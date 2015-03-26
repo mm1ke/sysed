@@ -122,7 +122,7 @@ mode_backup() {
 	# create snapshot
 	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
 
-	echo -n "Backuping... "
+	echo -n "Create backup..."
 	if ((${USE_ALTERNATE})); then
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
 	else
@@ -222,6 +222,7 @@ mode_clone() {
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
 		# default: use original fs
+		#TODO: check for mkfs.${FS} binaries
 		case "${FS}" in
 			btrfs)
 				mkfs.btrfs -f ${DEVLV}/${NAME}
@@ -387,12 +388,6 @@ while true ; do
 				#*) EDIT_FILE="${2}"; shift 2 ;;
 			esac ;;
 		-l|--list) set_mode "list" ; shift ;;
-#		-m|--modules)
-#			set_mode "modules"
-#			case "$2" in
-#				"") MODULES="/lib/modules/$(uname -r)"; shift 2 ;;
-#				*) MODULES="${2}" ; shift 2 ;;
-#			esac ;;
 		# options
 		-i|--install) INSTALL_GRUB=1 ; shift ;;
 		-u|--uninstall) UNINSTALL_GRUB=1 ; shift ;;
@@ -497,6 +492,7 @@ case "$MODE" in
 		mode_list
 		;;
 	delete)
+		#TODO: remove grub entries doesn't work 100% correct
 		test_lv; test_devlv; test_running_sys
 
 		mode_delete
