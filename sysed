@@ -45,6 +45,7 @@ LV_FILTER="sys_"
 MODE=""
 FS=""
 CALCULATE_SIZE=""
+MKFS_BIN=""
 
 DELETE_FILE=0
 UPDATE_FILE=0
@@ -221,30 +222,8 @@ mode_clone() {
 
 		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
 	else
-		# default: use original fs
-		#TODO: check for mkfs.${FS} binaries
-		case "${FS}" in
-			btrfs)
-				mkfs.btrfs -f ${DEVLV}/${NAME}
-				;;
-			ext2)
-				mkfs.ext2 -q ${DEVLV}/${NAME}
-				;;
-			ext3)
-				mkfs.ext3 -q ${DEVLV}/${NAME}
-				;;
-			ext4)
-				mkfs.ext4 -q ${DEVLV}/${NAME}
-				;;
-			jfs)
-				mkfs.jfs -q ${DEVLV}/${NAME}
-				;;
-			*)
-				echo "\"${FS}\" not valid. Arborting!"
-				exit 1
-				;;
-		esac
-
+		${MKFS_BIN} ${DEVLV}/${NAME}
+		
 		local lv_org="/tmp/$RANDOM"
 		local lv_copy="/tmp/$RANDOM"
 		mkdir -p ${lv_org} ${lv_copy}
@@ -471,12 +450,32 @@ test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${NAME}\" already in use. Exit!"; exit 1; fi }
 # test if given FS type can be used
 test_fs(){
-	if ! [ ${FS} == "ext2" ] && ! [ ${FS} == "ext3" ] && ! [ ${FS} == "ext4" ] && ! [ ${FS} == "jfs" ] && ! [ ${FS} == "btrfs" ]; then
-		echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs, btrfs"
-		exit 1
-	fi
+	case "${FS}" in
+		btrfs)
+			MKFS_BIN="/sbin/mkfs.btrfs -f"
+			;;
+		ext2)
+			MKFS_BIN="/sbin/mkfs.ext2 -q"
+			;;
+		ext3)
+			MKFS_BIN="/sbin/mkfs.ext3 -q"
+			;;
+		ext4)
+			MKFS_BIN="/sbin/mkfs.ext4 -q"
+			;;
+		jfs)
+			MKFS_BIN="/sbin/mkfs.jfs -q"
+			;;
+		*)
+			echo "\"${FS}\": Invalid fs. Supported are: ext2, ext3, ext4, jfs, btrfs"
+			exit 1
+			;;
+	esac
 }
+# check if filename already exists.
 test_filename(){ if [ -e "${1}" ]; then read -p "File exists. Overwrite? (Ctrl-C for cancel!)"; fi }
+# check if command exists.
+test_cmd(){ if ! [ `command -v ${1}` ]; then echo "Could not find ${1}. Exit!"; exit 1; fi }
 
 case "$MODE" in
 	list)
@@ -503,6 +502,7 @@ case "$MODE" in
 
 		if ! [ -z ${FS} ]; then
 			test_fs
+			test_cmd "${MKFS_BIN}"
 		else
 			# use fs of the original sys
 			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
