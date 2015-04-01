@@ -46,6 +46,7 @@ MODE=""
 FS=""
 CALCULATE_SIZE=""
 MKFS_BIN=""
+DEFAULT_ENC_SETTINGS=""
 
 DELETE_FILE=0
 UPDATE_FILE=0
@@ -267,12 +268,13 @@ mode_clone() {
 
 usage() {
 	echo -e "* Cloning"
-	echo -e "$0 -c|--clone[LV] [-n] ([-i] (( [-a] || [-f] [-s] )) )"
+	echo -e "$0 -c|--clone[LV] [-n] ([-i] (( [-a] || ( [-f] [-s] ) [-y] )) )"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
 	echo -e " -f|--fs\t\troot filestyem type"
 	echo -e " -s|--size\t\tSize of the new sys"
+	echo -e " -y|--secure\t\tEncrypt root partition"
 	echo
 	echo -e "* Deleting"
 	echo -e "$0 -d|--delete[LV] [-u]"
@@ -320,7 +322,7 @@ if [ $# -lt 1 ]; then usage; exit; fi
 # foo = no argument
 # foo: = must have a argument
 # foo:: = argument is optional
-OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t:g: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch:,grep: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t:g:y: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch:,grep:,secure: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -405,6 +407,11 @@ while true ; do
 					[ -z ${2##*/} ] && SAVE_NAME="$(get_actual_lv)" || SAVE_NAME="${2##*/}"
 					[ -d ${2%/*} ] && SAVE_PATH="${2%/*}" || SAVE_PATH=`pwd`
 					shift 2 ;;
+			esac ;;
+		-y|--secure)
+			case "$2" in
+				"") shift 2 ;;
+				*) SEC_KEY="${2}" ; shift 2 ;;
 			esac ;;
 		-v|--verbose)
 			VERBOSE_OUTPUT=1
@@ -497,6 +504,10 @@ case "$MODE" in
 		mode_delete
 		;;
 	clone)
+		if [ -n "${SEC_KEY}" ] && ((${USE_ALTERNATE})); then
+			echo "Cannot encrypt root when using dd"
+			exit 1
+		fi
 		test_lv; test_devlv; test_name; test_used_name
 		#TODO: implement SIZE possibility
 
