@@ -29,7 +29,6 @@
 # TODO:
 #- clone with settings size (resize?) (-s size)
 #- backup/restore/delete multiple
-#- systemd support
 
 # programs
 LVCREATE="/sbin/lvcreate"
@@ -39,24 +38,25 @@ LVS="/sbin/lvs"
 
 # default vars
 VG="vg0"
-DEVLV="/dev/${VG}/"
+DEVVG="/dev/${VG}/"
 GRUB_CFG="/boot/grub/grub.cfg"
 LV_FILTER="sys_"
 MODE=""
 FS=""
 CALCULATE_SIZE=""
 MKFS_BIN=""
-DEFAULT_ENC_SETTINGS=""
+DEFAULT_ENC_SETTINGS="-ctwofish-xts-plain:wd256 -s256"
 
 DELETE_FILE=0
 UPDATE_FILE=0
 USE_NAME=0
-
+ENCRYPTION=0
+SYSTEMD=0
 # save mode, ask before really delete something
 SAVE=1
 
 mode_list() {
-	echo "Actual Running SYS:"
+	echo "  Actual Running SYS:"
 	get_actual_lv
 	echo
 	echo "Full list:"
@@ -71,12 +71,15 @@ mode_list() {
 		IFS=","
 
 		for lv in ${LIST_MODULES}; do
-			mount "${DEVLV}/${lv}" ${mountpoint}
-			ARCH=`file ${mountpoint}/bin/bash | cut -d' ' -f 3`
-			echo -e "* ${lv} (${ARCH})"
-			du -sh ${mountpoint}/lib/modules/*|sed "s|${mountpoint}||g"
-			echo
-			umount ${mountpoint}
+			if $(mount "${DEVVG}/${lv}" ${mountpoint} > /dev/null 2>&1); then
+				ARCH=`file ${mountpoint}/bin/bash | cut -d' ' -f 3`
+				echo -e "* ${lv} (${ARCH})"
+				du -sh ${mountpoint}/lib/modules/*|sed "s|${mountpoint}||g"
+				echo
+				umount ${mountpoint}
+			else
+				echo "ERROR: couldn't mount ${lv}. Maybe it's encrypted"
+			fi
 		done
 
 		rm -rf ${mountpoint}
@@ -97,10 +100,13 @@ edit_modify() {
 	IFS=","
 	for l in ${LV}; do
 		echo -n "."
-		mount "${DEVLV}/${l}" ${mountpoint}
-		((DELETE_FILE)) && rm -rf "${mountpoint}/${EDIT_FILE}"
-		((UPDATE_FILE)) && cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
-		umount ${mountpoint}
+		if $(mount "${DEVVG}/${l}" ${mountpoint} > /dev/null 2>&1); then
+			((DELETE_FILE)) && rm -rf "${mountpoint}/${EDIT_FILE}"
+			((UPDATE_FILE)) && cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
+			umount ${mountpoint}
+		else
+			echo "ERROR: couldn't mount ${l}. Maybe it's encrypted"
+		fi
 	done
 	IFS=${oldifs}
 	echo "Done!"
@@ -109,7 +115,7 @@ edit_modify() {
 }
 
 edit_rename() {
-	${LVRENAME} "${DEVLV}/${LV}" "${DEVLV}/${NAME}"
+	${LVRENAME} "${DEVVG}/${LV}" "${DEVVG}/${NAME}"
 	sed -i "s/${LV}/${NAME}/g" ${GRUB_CFG}
 }
 
@@ -122,15 +128,15 @@ mode_backup() {
 	fi
 
 	# create snapshot
-	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
+	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVVG}/${LV}"
 
 	echo -n "Create backup..."
 	if ((${USE_ALTERNATE})); then
-		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
+		dd if=${DEVVG}/${LV}-snapshot bs=4k conv=sync,noerror 2>/dev/null | pigz -c > ${SAVE_PATH}/${SAVE_NAME}.gz
 	else
 		local mountpoint="/tmp/mp-${RANDOM}"
 		mkdir -p "${mountpoint}"
-		mount ${DEVLV}/${LV}-snapshot ${mountpoint}
+		mount ${DEVVG}/${LV}-snapshot ${mountpoint}
 
 		tar --create --use-compress-prog=pigz --same-permissions \
 		--file ${SAVE_PATH}/${SAVE_NAME}.tar.gz -C ${mountpoint} --exclude="lost+found" .
@@ -139,7 +145,7 @@ mode_backup() {
 		rm -rf ${mountpoint}
 	fi
 	# delete snapshot
-	${LVREMOVE} --force ${DEVLV}/${LV}-snapshot
+	${LVREMOVE} --force ${DEVVG}/${LV}-snapshot
 }
 
 mode_restore() {
@@ -155,12 +161,12 @@ mode_restore() {
 	echo -n "Restoring..."
 
 	if ((${CALCULATE_SIZE})); then
-		pigz -d ${RESTORE_FILE} | dd of="${DEVLV}/${NAME}"
+		pigz -d ${RESTORE_FILE} | dd of="${DEVVG}/${NAME}"
 	else
-		mkfs -t ${FS} ${DEVLV}/${NAME}
+		mkfs -t ${FS} ${DEVVG}/${NAME}
 		local mountpoint="/tmp/mp-${RANDOM}"
 		mkdir -p "${mountpoint}"
-		mount ${DEVLV}/${NAME} ${mountpoint}
+		mount ${DEVVG}/${NAME} ${mountpoint}
 
 		tar xvpfz ${RESTORE_FILE} -C "${mountpoint}"
 
@@ -175,25 +181,25 @@ mode_delete() {
 		if ((${UNINSTALL_GRUB})); then
 			echo "Following Grub Entry will be removed:"
 			echo
-			if ! `cat ${GRUB_CFG} |grep ${LV} > /dev/null`; then
+			if ! `cat ${GRUB_CFG} |grep "${LV}\b" > /dev/null`; then
 				echo "No Grub Entry found! Nothing gonna be removed!"
 				UNINSTALL_GRUB=0
 			else
-				cat ${GRUB_CFG} | grep -A2 -B1 ${LV}
+				cat ${GRUB_CFG} | grep -A2 -B1 "${LV}\b"
 			fi
 			echo
 		fi
-		${LVREMOVE} "${DEVLV}/${LV}"
+		${LVREMOVE} "${DEVVG}/${LV}"
 		(($?)) && exit 1
 	else
-		${LVREMOVE} --force "${DEVLV}/${LV}"
+		${LVREMOVE} --force "${DEVVG}/${LV}"
 	fi
 
 	if ((${UNINSTALL_GRUB})); then
 		# insert beginning of removal
-		awk -v pat="${LV}" '{a[NR]=$0;}END{for(i=1;i<=NR;i++){if(a[i+1] ~ pat ){print "<!-- BOF CLEAN -->\n"a[i];}else{print a[i];}}}' ${GRUB_CFG} > /tmp/grub.cfg.tmp
+		awk -v pat="\\\y${LV}\\\y" '{a[NR]=$0;}END{for(i=1;i<=NR;i++){if(a[i+1] ~ pat ){print "<!-- BOF CLEAN -->\n"a[i];}else{print a[i];}}}' ${GRUB_CFG} > /tmp/grub.cfg.tmp
 		# insert end of removal
-		sed -i '/${LV}/{N;N;s/$/\n<!-- EOF CLEAN -->/}' /tmp/grub.cfg.tmp
+		sed -i '/BOF CLEAN/{N;N;N;N;s/$/\n<!-- EOF CLEAN -->/}' /tmp/grub.cfg.tmp
 		# remove entry
 		sed -i '/<!-- BOF CLEAN -->/,/<!-- EOF CLEAN -->/d' /tmp/grub.cfg.tmp
 		mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
@@ -203,35 +209,47 @@ mode_delete() {
 
 mode_clone() {
 	local snapshotsize=10G
-	local copy_size=`${LVS} ${DEVLV}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`
+	local copy_size=`${LVS} ${DEVVG}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`
+	local work_path="${DEVVG}/${NAME}"
 
 	# create new lv
 	${LVCREATE} --size ${copy_size}b --name "${NAME}" "${VG}"
 
+	if ((${ENCRYPTION})); then
+		echo "encryption enabled - password: ${SEC_KEY}"
+		echo "${SEC_KEY}" | cryptsetup luksFormat "${DEVVG}/${NAME}" ${DEFAULT_ENC_SETTINGS}
+		echo "${SEC_KEY}" | cryptsetup luksOpen "${DEVVG}/${NAME}" "${NAME}_encrypted"
+		echo "Zero-ing luks partition - This can take some minutes"
+		work_path="/dev/mapper/${NAME}_encrypted"
+		dd if=/dev/zero of=${work_path} bs=4096
+	fi
+
 	# create snapshot
-	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVLV}/${LV}"
+	${LVCREATE} --size ${snapshotsize} --snapshot --name ${LV}-snapshot "${DEVVG}/${LV}"
 	echo "Copy..."
 	if ((${USE_ALTERNATE})); then
-
-		# get ARCH
 		local lv_org="/tmp/$RANDOM"
 		mkdir -p ${lv_org}
-		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
+		mount -o ro ${DEVVG}/${LV}-snapshot ${lv_org}
+		# get arch
 		ARCH=`file ${lv_org}/bin/bash | cut -d' ' -f 3`
 		umount ${lv_org}
 		rm -rf ${lv_org}
 
-		dd if=${DEVLV}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVLV}/${NAME}
+		dd if=${DEVVG}/${LV}-snapshot bs=4k conv=sync,noerror of=${DEVVG}/${NAME}
 	else
-		${MKFS_BIN} ${DEVLV}/${NAME}
+		${MKFS_BIN} ${work_path}
 		
 		local lv_org="/tmp/$RANDOM"
 		local lv_copy="/tmp/$RANDOM"
 		mkdir -p ${lv_org} ${lv_copy}
 
-		mount -o ro ${DEVLV}/${LV}-snapshot ${lv_org}
-		mount ${DEVLV}/${NAME} ${lv_copy}
-
+		mount -o ro ${DEVVG}/${LV}-snapshot ${lv_org}
+		mount ${work_path} ${lv_copy}
+		
+		# check for systemd
+		[ -e "${lv_org}/usr/lib/systemd/systemd" ] && SYSTEMD=1
+		# check arch
 		ARCH=`file ${lv_org}/bin/bash | cut -d' ' -f 3`
 
 		rsync -aAX --info=progress2 --exclude={"/tmp/*","/lost+found","/usr/portage/*"} /${lv_org}/* /${lv_copy}/
@@ -241,9 +259,13 @@ mode_clone() {
 		umount ${lv_org}
 
 		rm -rf ${lv_org} ${lv_copy}
+
+		if ((${ENCRYPTION})); then
+			cryptsetup luksClose ${work_path}
+		fi
 	fi
 	# delete snapshot
-	${LVREMOVE} --force "${DEVLV}/${LV}-snapshot"
+	${LVREMOVE} --force "${DEVVG}/${LV}-snapshot"
 
 	if ((${INSTALL_GRUB})); then
 		case "$ARCH" in
@@ -262,19 +284,27 @@ mode_clone() {
 		local grub_name=`echo ${NAME}|tr '_' ' '`
 		# use kernel of the original sys
 		local grub_kernel=`cat ${GRUB_CFG} | grep -m1 ${LV} | cut -d ' ' -f 2`
-		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} consoleblank=0 lvm=${NAME}\n\tinitrd /initrd-${SUFFIX}.cpio.gz\n}" >> ${GRUB_CFG}
+		# kernel cmd args
+		local grub_kernel_cmd_args="consoleblank=0 lvm=${NAME}"
+		((${SYSTEMD})) && grub_kernel_cmd_args="${grub_kernel_cmd_args} init=/usr/lib/systemd/systemd"
+		((${ENCRYPTION})) && grub_kernel_cmd_args="${grub_kernel_cmd_args} luks=yes"
+
+		echo -e "menuentry '${grub_name}' {\n\tlinux ${grub_kernel} ${grub_kernel_cmd_args}\n\tinitrd /initrd-${SUFFIX}.cpio.gz\n}" >> ${GRUB_CFG}
 	fi
 }
 
 usage() {
 	echo -e "* Cloning"
+	echo
+	echo -e "$0 -q|--quick\tquick clone, ignores other settings"
+	echo
 	echo -e "$0 -c|--clone[LV] [-n] ([-i] (( [-a] || ( [-f] [-s] ) [-y] )) )"
 	echo -e " -n|--name [NAME]\tname of the new sys (REQUIRED)"
 	echo -e " -i|--install\t\tcreate grub entry"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
 	echo -e " -f|--fs\t\troot filestyem type"
-	echo -e " -s|--size\t\tSize of the new sys"
 	echo -e " -y|--secure\t\tEncrypt root partition"
+	echo -e " -s|--size\t\tSize of the new sys (in GB)"
 	echo
 	echo -e "* Deleting"
 	echo -e "$0 -d|--delete[LV] [-u]"
@@ -322,7 +352,7 @@ if [ $# -lt 1 ]; then usage; exit; fi
 # foo = no argument
 # foo: = must have a argument
 # foo:: = argument is optional
-OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t:g:y: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch:,grep:,secure: -n 'sysed' -- "$@"`
+OPTS=`getopt -o hc::d:b::r:le:n:iuas:p:f:v::x:t:g:qy: --long help,clone::,delete:,backup::,restore:,list,edit:,name:install,uninstall,alternate,size:,path:,fs:,verbose::,remove:,touch:,grep:,quick,secure: -n 'sysed' -- "$@"`
 eval set -- "$OPTS"
 
 # extract options
@@ -330,6 +360,9 @@ while true ; do
 	case "$1" in
 		# help
 		-h|--help) usage ; shift ;;
+		-q|--quick)
+			set_mode "clone"
+			QUICK_CLONE=1 ; shift ;;
 		# modes
 		-c|--clone)
 			set_mode "clone"
@@ -409,6 +442,7 @@ while true ; do
 					shift 2 ;;
 			esac ;;
 		-y|--secure)
+			ENCRYPTION=1
 			case "$2" in
 				"") shift 2 ;;
 				*) SEC_KEY="${2}" ; shift 2 ;;
@@ -441,20 +475,20 @@ test_running_sys() { if [ ${LV} == $(get_actual_lv) ]; then echo "Can't use runn
 # test if User has passed a system name
 test_lv() { if [ -z ${LV} ]; then echo "No sys given. Exit!"; exit; fi }
 # test if User's passed system name exists
-test_devlv() { if ! [ -b "${DEVLV}/${LV}" ]; then echo "\"${DEVLV}/${LV}\" not found. Exit!"; exit 1; fi }
+test_devlv() { if ! [ -b "${DEVVG}/${LV}" ]; then echo "\"${DEVVG}/${LV}\" not found. Exit!"; exit 1; fi }
 # test if User's passed systems name exists
 test_devlv_multi() {
 	oldifs="${IFS}"
 	IFS=","
 	for i in ${1}; do
-		if ! [ -b "${DEVLV}/${i}" ]; then echo "\"${DEVLV}/${i}\" doesn't exist. Exit!"; exit 1; fi
+		if ! [ -b "${DEVVG}/${i}" ]; then echo "\"${DEVVG}/${i}\" doesn't exist. Exit!"; exit 1; fi
 	done
 	IFS=${oldifs}
 }
 # test if User has passed a name
 test_name() { if [ -z ${NAME} ]; then echo "No name given. Exit!"; exit 1; fi }
 # test if User's passed name already exists
-test_used_name(){ if [ -b "${DEVLV}/${NAME}" ]; then echo "\"${DEVLV}/${NAME}\" already in use. Exit!"; exit 1; fi }
+test_used_name(){ if [ -b "${DEVVG}/${NAME}" ]; then echo "\"${DEVVG}/${NAME}\" already in use. Exit!"; exit 1; fi }
 # test if given FS type can be used
 test_fs(){
 	case "${FS}" in
@@ -484,21 +518,29 @@ test_filename(){ if [ -e "${1}" ]; then read -p "File exists. Overwrite? (Ctrl-C
 # check if command exists.
 test_cmd(){ if ! [ `command -v ${1}` ]; then echo "Could not find ${1}. Exit!"; exit 1; fi }
 
+# set settings for quick clone
+if ((${QUICK_CLONE})); then
+	MODE=clone
+	FS=""
+	LV="$(get_actual_lv)"
+	NAME="$(get_actual_lv)_testing"
+	INSTALL_GRUB=1
+fi
+
 case "$MODE" in
 	list)
-		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVLV}| egrep -v "${LV_FILTER}"|tr '\n' ','`
+		[ "${LIST_MODULES}" == "all" ] && LIST_MODULES=`ls ${DEVVG}| egrep -v "${LV_FILTER}"|tr '\n' ','`
 
 		oldifs="${IFS}"
 		IFS=","
 		for i in ${LIST_MODULES}; do
-			if ! [ -e ${DEVLV}/${i} ]; then echo "${DEVLV}/${i} doesn't exist. Exit!"; exit 1; fi
+			if ! [ -e ${DEVVG}/${i} ]; then echo "${DEVVG}/${i} doesn't exist. Exit!"; exit 1; fi
 		done
 		IFS=${oldifs}
 
 		mode_list
 		;;
 	delete)
-		#TODO: remove grub entries doesn't work 100% correct
 		test_lv; test_devlv; test_running_sys
 
 		mode_delete
@@ -511,13 +553,12 @@ case "$MODE" in
 		test_lv; test_devlv; test_name; test_used_name
 		#TODO: implement SIZE possibility
 
-		if ! [ -z ${FS} ]; then
-			test_fs
-			test_cmd "${MKFS_BIN}"
-		else
-			# use fs of the original sys
-			FS=`blkid -o value -s TYPE ${DEVLV}/${LV}`
+		if [ -z ${FS} ]; then
+			FS=`blkid -o value -s TYPE ${DEVVG}/${LV}`
 		fi
+
+		test_fs
+		test_cmd "${MKFS_BIN}"
 
 		mode_clone
 		;;
@@ -578,9 +619,9 @@ case "$MODE" in
 			edit_rename
 		else
 			# create a list of all lv's if "all" is selected
-			[ ${LV} == "all" ] && LV=`ls ${DEVLV}| egrep -v "${LV_FILTER}|$(get_actual_lv)"|tr '\n' ','`
+			[ ${LV} == "all" ] && LV=`ls ${DEVVG}| egrep -v "${LV_FILTER}|\<$(get_actual_lv)\>"|tr '\n' ','`
 			# never modify running lv
-			LV=`echo ${LV}|sed "s/$(get_actual_lv)//g"`
+			LV=`echo ${LV}|sed "s/\<$(get_actual_lv)\>//g"`
 			test_devlv_multi ${LV}
 
 			((UPDATE_FILE)) && if ! [ -e ${EDIT_FILE} ]; then echo "File/dir doesn't exist. Exit!"; exit 1; fi
