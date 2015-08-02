@@ -209,11 +209,15 @@ mode_delete() {
 
 mode_clone() {
 	local snapshotsize=10G
-	local copy_size=`${LVS} ${DEVVG}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`
+	if ! [ -z ${SIZE} ];
+		local copy_size="${SIZE}"
+	else
+		local copy_size="`${LVS} ${DEVVG}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`b"
+	fi
 	local work_path="${DEVVG}/${NAME}"
 
 	# create new lv
-	${LVCREATE} --size ${copy_size}b --name "${NAME}" "${VG}"
+	${LVCREATE} --size ${copy_size} --name "${NAME}" "${VG}"
 
 	if ((${ENCRYPTION})); then
 		echo "encryption enabled - password: ${SEC_KEY}"
@@ -551,7 +555,11 @@ case "$MODE" in
 			exit 1
 		fi
 		test_lv; test_devlv; test_name; test_used_name
-		#TODO: implement SIZE possibility
+		if ! [ -z ${SIZE} ]; then
+			if ! [ "${SIZE: -1}" == "G" ]; then
+				SIZE="${SIZE}G"
+			fi
+		fi
 
 		if [ -z ${FS} ]; then
 			FS=`blkid -o value -s TYPE ${DEVVG}/${LV}`
