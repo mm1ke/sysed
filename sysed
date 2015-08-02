@@ -307,8 +307,8 @@ usage() {
 	echo -e " -i|--install\t\tcreate grub entry"
 	echo -e " -a|--alternate\t\tuse alterneate copy method (dd)"
 	echo -e " -f|--fs\t\troot filestyem type"
-	echo -e " -y|--secure\t\tEncrypt root partition"
-	echo -e " -s|--size\t\tSize of the new sys (in GB)"
+	echo -e " -y|--secure\t\tEncrypt root partition (not working with -a)"
+	echo -e " -s|--size\t\tSize of the new sys in GB (not working with -a)"
 	echo
 	echo -e "* Deleting"
 	echo -e "$0 -d|--delete[LV] [-u]"
@@ -550,10 +550,11 @@ case "$MODE" in
 		mode_delete
 		;;
 	clone)
-		if [ -n "${SEC_KEY}" ] && ((${USE_ALTERNATE})); then
-			echo "Cannot encrypt root when using dd"
-			exit 1
+		if ((${USE_ALTERNATE})); then
+			if [ -n "${SEC_KEY}" ]; then echo "Cannot encrypt root when using dd"; exit 1; fi
+			if [ -n "${SIZE}" ]; then echo "Cannot specify size when using dd"; exit 1; fi
 		fi
+
 		test_lv; test_devlv; test_name; test_used_name
 		if ! [ -z ${SIZE} ]; then
 			if ! [ "${SIZE: -1}" == "G" ]; then
