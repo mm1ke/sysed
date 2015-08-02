@@ -209,7 +209,7 @@ mode_delete() {
 
 mode_clone() {
 	local snapshotsize=10G
-	if ! [ -z ${SIZE} ];
+	if ! [ -z ${SIZE} ]; then
 		local copy_size="${SIZE}"
 	else
 		local copy_size="`${LVS} ${DEVVG}/${LV} -o LV_SIZE --noheadings --units b --nosuffix`b"
