@@ -52,6 +52,7 @@ UPDATE_FILE=0
 USE_NAME=0
 ENCRYPTION=0
 SYSTEMD=0
+
 # save mode, ask before really delete something
 SAVE=1
 
@@ -204,7 +205,6 @@ mode_delete() {
 		sed -i '/<!-- BOF CLEAN -->/,/<!-- EOF CLEAN -->/d' /tmp/grub.cfg.tmp
 		mv /tmp/grub.cfg.tmp /boot/grub/grub.cfg
 	fi
-		
 }
 
 mode_clone() {
