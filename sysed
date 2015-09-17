@@ -102,7 +102,9 @@ edit_modify() {
 	for l in ${LV}; do
 		echo -n "."
 		if $(mount "${DEVVG}/${l}" ${mountpoint} > /dev/null 2>&1); then
-			((DELETE_FILE)) && rm -rf "${mountpoint}/${EDIT_FILE}"
+			# always remove original since it would replaced anyway when
+			# updating is selected
+			rm -rf "${mountpoint}/${EDIT_FILE}"
 			((UPDATE_FILE)) && cp -r ${EDIT_FILE} "${mountpoint}/${EDIT_FILE}"
 			umount ${mountpoint}
 		else
